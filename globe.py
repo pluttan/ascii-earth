@@ -766,6 +766,100 @@ def interactive(tex, args):
         if dlat:
             args.lat = max(-90, min(90, args.lat + dlat))
 
+    def handle_event(ev):
+        nonlocal autospin, drag, help_open, tex
+        if ev[0] == "mouse":
+            if help_open:
+                return
+            _, b, x, y, press = ev
+            if b == 64:
+                zoom(1)
+            elif b == 65:
+                zoom(-1)
+            elif press == "m":
+                drag = None
+            elif b in (32, 0) and not args.follow:  # drag (off in follow)
+                if drag is not None:
+                    args.lon = (args.lon - (x - drag[0]) * 2) % 360
+                    args.lat = max(-90, min(90, args.lat + (y - drag[1]) * 2))
+                drag = (x, y)
+            return
+        k = ev[1]
+        if help_open:
+            if k == "q":
+                raise KeyboardInterrupt
+            help_open = False  # any key closes the list
+            sys.stdout.write("\x1b[2J")
+            return
+        if k in ("q", "\x1b"):
+            raise KeyboardInterrupt
+        elif k == "?":
+            help_open = True
+        elif k in ("<", ">"):  # previous / next body
+            prev_body = args.body
+            args.body = cycle(BODY_NAMES, args.body, -1 if k == "<" else 1)
+            try:  # texture may need a download; never die if it fails
+                tex = body_texture(args.body)
+            except BaseException:
+                _log_crash(args)
+                args.body = prev_body
+            else:
+                bi = BODIES[args.body]
+                args.top = bi.get("top", args.body.upper())
+                args.bottom = bi.get("bottom", "")
+                apply_scale()
+        elif k == "m":  # scale mode: fit -> sqrt -> real
+            args.scale = cycle(["fit", "sqrt", "real"], args.scale)
+            apply_scale()
+        elif k == "R":  # planetary rings on / off
+            args.no_rings = not args.no_rings
+            apply_scale()
+        elif k in ("h", "\x1b[D"):
+            rotate(dlon=-args.step)
+        elif k in ("l", "\x1b[C"):
+            rotate(dlon=args.step)
+        elif k in ("k", "\x1b[A"):
+            rotate(dlat=args.step)
+        elif k in ("j", "\x1b[B"):
+            rotate(dlat=-args.step)
+        elif k in ("+", "="):
+            zoom(1)
+        elif k in ("-", "_"):
+            zoom(-1)
+        elif k == "g":
+            args.glyphs = cycle(modes, args.glyphs)
+        elif k == "p":
+            args.palette = cycle(PALETTE_NAMES, args.palette)
+        elif k == "P":
+            args.palette = cycle(PALETTE_NAMES, args.palette, -1)
+        elif k == "c":
+            args.color = cycle(colors, args.color)
+        elif k == "n":
+            args.sun = not args.sun
+        elif k == "f":
+            toggle_follow()
+        elif k == "s":
+            args.no_stars = not args.no_stars
+        elif k == "o":
+            args.no_ring = not args.no_ring
+        elif k == "b":
+            args.no_labels = not args.no_labels
+        elif k == "]":
+            args.saturation = min(4.0, args.saturation + 0.1); set_color(args.saturation, args.gamma)
+        elif k == "[":
+            args.saturation = max(0.0, args.saturation - 0.1); set_color(args.saturation, args.gamma)
+        elif k == ".":
+            args.gamma = max(0.2, args.gamma - 0.05); set_color(args.saturation, args.gamma)
+        elif k == ",":
+            args.gamma = min(1.5, args.gamma + 0.05); set_color(args.saturation, args.gamma)
+        elif k == " ":
+            autospin = not autospin
+        elif k == "r":
+            for key, val in snap.items():
+                setattr(args, key, val)
+            set_color(args.saturation, args.gamma)
+            autospin = False
+
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
@@ -809,97 +903,12 @@ def interactive(tex, args):
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
-                    if ev[0] == "mouse":
-                        if help_open:
-                            continue
-                        _, b, x, y, press = ev
-                        if b == 64:
-                            zoom(1)
-                        elif b == 65:
-                            zoom(-1)
-                        elif press == "m":
-                            drag = None
-                        elif b in (32, 0) and not args.follow:  # drag (off in follow)
-                            if drag is not None:
-                                args.lon = (args.lon - (x - drag[0]) * 2) % 360
-                                args.lat = max(-90, min(90, args.lat + (y - drag[1]) * 2))
-                            drag = (x, y)
-                        continue
-                    k = ev[1]
-                    if help_open:
-                        if k == "q":
-                            raise KeyboardInterrupt
-                        help_open = False  # any key closes the list
-                        sys.stdout.write("\x1b[2J")
-                        continue
-                    if k in ("q", "\x1b"):
-                        raise KeyboardInterrupt
-                    elif k == "?":
-                        help_open = True
-                    elif k in ("<", ">"):  # previous / next body
-                        prev_body = args.body
-                        args.body = cycle(BODY_NAMES, args.body, -1 if k == "<" else 1)
-                        try:  # texture may need a download; never die if it fails
-                            tex = body_texture(args.body)
-                        except BaseException:
-                            _log_crash(args)
-                            args.body = prev_body
-                        else:
-                            bi = BODIES[args.body]
-                            args.top = bi.get("top", args.body.upper())
-                            args.bottom = bi.get("bottom", "")
-                            apply_scale()
-                    elif k == "m":  # scale mode: fit -> sqrt -> real
-                        args.scale = cycle(["fit", "sqrt", "real"], args.scale)
-                        apply_scale()
-                    elif k == "R":  # planetary rings on / off
-                        args.no_rings = not args.no_rings
-                        apply_scale()
-                    elif k in ("h", "\x1b[D"):
-                        rotate(dlon=-args.step)
-                    elif k in ("l", "\x1b[C"):
-                        rotate(dlon=args.step)
-                    elif k in ("k", "\x1b[A"):
-                        rotate(dlat=args.step)
-                    elif k in ("j", "\x1b[B"):
-                        rotate(dlat=-args.step)
-                    elif k in ("+", "="):
-                        zoom(1)
-                    elif k in ("-", "_"):
-                        zoom(-1)
-                    elif k == "g":
-                        args.glyphs = cycle(modes, args.glyphs)
-                    elif k == "p":
-                        args.palette = cycle(PALETTE_NAMES, args.palette)
-                    elif k == "P":
-                        args.palette = cycle(PALETTE_NAMES, args.palette, -1)
-                    elif k == "c":
-                        args.color = cycle(colors, args.color)
-                    elif k == "n":
-                        args.sun = not args.sun
-                    elif k == "f":
-                        toggle_follow()
-                    elif k == "s":
-                        args.no_stars = not args.no_stars
-                    elif k == "o":
-                        args.no_ring = not args.no_ring
-                    elif k == "b":
-                        args.no_labels = not args.no_labels
-                    elif k == "]":
-                        args.saturation = min(4.0, args.saturation + 0.1); set_color(args.saturation, args.gamma)
-                    elif k == "[":
-                        args.saturation = max(0.0, args.saturation - 0.1); set_color(args.saturation, args.gamma)
-                    elif k == ".":
-                        args.gamma = max(0.2, args.gamma - 0.05); set_color(args.saturation, args.gamma)
-                    elif k == ",":
-                        args.gamma = min(1.5, args.gamma + 0.05); set_color(args.saturation, args.gamma)
-                    elif k == " ":
-                        autospin = not autospin
-                    elif k == "r":
-                        for key, val in snap.items():
-                            setattr(args, key, val)
-                        set_color(args.saturation, args.gamma)
-                        autospin = False
+                    try:
+                        handle_event(ev)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception:
+                        _log_crash(args)
             if autospin:
                 args.lon = (args.lon + args.step) % 360
     except KeyboardInterrupt:
