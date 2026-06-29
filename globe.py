@@ -862,7 +862,11 @@ def interactive(tex, args):
 
     try:
         tty.setcbreak(fd)
-        sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+        # Alternate screen + mouse tracking. The alt-screen matters under tmux:
+        # in the main buffer tmux grabs the mouse wheel for copy-mode (the app
+        # "vanishes" into the scrollback, looking like a crash); an alt-screen
+        # app gets the wheel itself. Restored on exit.
+        sys.stdout.write("\x1b[?1049h\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
             # A bad state (e.g. an extreme zoom) must never kill the app: log the
             # real traceback to ~/.cache/ascii-earth/crash.log, reset to a safe
@@ -914,7 +918,7 @@ def interactive(tex, args):
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[0m\n")
+        sys.stdout.write("\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l\n")
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         sys.stdout.flush()
 
@@ -1005,7 +1009,7 @@ def main():
     # follow advances via the real clock (in build_frame); only spin steps lon.
     delay = 1.0 if (args.follow and not args.spin) else 1.0 / max(args.fps, 1.0)
     try:
-        sys.stdout.write("\x1b[2J\x1b[?25l")
+        sys.stdout.write("\x1b[?1049h\x1b[2J\x1b[?25l")
         while True:
             if args.spin:
                 args.lon = (args.lon + args.step) % 360
@@ -1016,7 +1020,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\x1b[?25h\x1b[0m\n")
+        sys.stdout.write("\x1b[?25h\x1b[0m\x1b[?1049l\n")
         sys.stdout.flush()
 
 
