@@ -98,6 +98,21 @@ def body_texture(body: str) -> np.ndarray:
     return load_texture(fetch_texture(info["url"], CACHE_DIR / info["file"]))
 
 
+def _log_crash(args):
+    """Append a traceback + the current state to a crash log, so an occasional
+    interactive crash can be diagnosed instead of just vanishing."""
+    import traceback
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_DIR / "crash.log", "a") as f:
+            f.write("=== crash ===\n" + traceback.format_exc())
+            f.write("state: " + repr({k: getattr(args, k, None) for k in (
+                "body", "scale", "scale_ref", "size", "glyphs", "palette",
+                "color", "lon", "lat", "aspect", "sun", "follow")}) + "\n\n")
+    except Exception:
+        pass
+
+
 # ==========================
 # ===  Glyph ramps       ===
 # ==========================
@@ -593,9 +608,13 @@ def build_frame(tex, args, status=None):
     # planet is drawn at its own size and clipped at the edges if it's bigger,
     # and the starfield fills the full viewport width.
     cols, rows = shutil.get_terminal_size((100, 40))
-    labels = not args.no_labels
-    n_status = len(status.split("\n")) if status is not None else 0
-    disc_h = max(1, rows - (2 if labels else 0) - n_status)
+    # Only reserve a row for a caption that actually has text — an empty one
+    # would just be a blank line; the disc/starfield takes that space instead.
+    top_txt = args.top if (not args.no_labels and args.top) else ""
+    bot_txt = args.bottom if (not args.no_labels and args.bottom) else ""
+    status_lines = status.split("\n") if status is not None else []
+    n_cap = (1 if top_txt else 0) + (1 if bot_txt else 0)
+    disc_h = max(1, rows - n_cap - len(status_lines))
     rx_c = args.size / 2.0
     ry_c = args.size / (2.0 * args.aspect)
     stars = 0.0 if args.no_stars else args.stars
@@ -607,14 +626,12 @@ def build_frame(tex, args, status=None):
         body = render_ramp(tex, cols, disc_h, rx_c, ry_c, lon0, lat0, ramp, args.color,
                            stars, not args.no_ring, args.palette, sun, ocean, rings)
     lines = []
-    if labels:
-        lines.append(_center(args.top, cols, args.color))
+    if top_txt:
+        lines.append(_center(top_txt, cols, args.color))
     lines += body
-    if labels:
-        lines.append(_center(args.bottom, cols, args.color))
-    if status is not None:
-        for sline in status.split("\n"):
-            lines.append(_center(sline, cols, args.color))
+    if bot_txt:
+        lines.append(_center(bot_txt, cols, args.color))
+    lines += [_center(s, cols, args.color) for s in status_lines]
     return "\n".join(lines)
 
 
@@ -753,21 +770,33 @@ def interactive(tex, args):
         tty.setcbreak(fd)
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
-            if help_open:
-                cols, rows = shutil.get_terminal_size((80, 40))
-                pad = max(0, (rows - len(HELP_LINES)) // 2)
-                lead = max(0, (cols - 48) // 2)
-                out = ["\x1b[H"] + ["\x1b[K\n"] * pad
-                for ln in HELP_LINES:
-                    out.append(" " * lead + ln + "\x1b[K\n")
-                sys.stdout.write("".join(out) + "\x1b[J")
-                sys.stdout.flush()
-            else:
-                bar = (f"  {args.body} · {args.scale} · sz {args.size} · {args.palette} · "
-                       f"sun {'on' if args.sun else 'off'} · follow {'on' if args.follow else 'off'} · "
-                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     <>body · m scale · ? keys · q")
-                frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
-                sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
+            # A bad state (e.g. an extreme zoom) must never kill the app: log the
+            # real traceback to ~/.cache/ascii-earth/crash.log, reset to a safe
+            # state, and carry on instead of crashing out.
+            try:
+                if help_open:
+                    cols, rows = shutil.get_terminal_size((80, 40))
+                    pad = max(0, (rows - len(HELP_LINES)) // 2)
+                    lead = max(0, (cols - 48) // 2)
+                    out = ["\x1b[H"] + ["\x1b[K\n"] * pad
+                    for ln in HELP_LINES:
+                        out.append(" " * lead + ln + "\x1b[K\n")
+                    sys.stdout.write("".join(out) + "\x1b[J")
+                    sys.stdout.flush()
+                else:
+                    bar = (f"  {args.body} · {args.scale} · sz {args.size} · {args.palette} · "
+                           f"sun {'on' if args.sun else 'off'} · follow {'on' if args.follow else 'off'} · "
+                           f"sat {args.saturation:.1f} gam {args.gamma:.2f}     <>body · m scale · ? keys · q")
+                    frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
+                    sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
+                    sys.stdout.flush()
+            except Exception:
+                _log_crash(args)
+                for _k, _v in snap.items():
+                    setattr(args, _k, _v)
+                set_color(args.saturation, args.gamma)
+                help_open = False
+                sys.stdout.write("\x1b[2J")
                 sys.stdout.flush()
             if help_open:
                 timeout = None
@@ -808,12 +837,18 @@ def interactive(tex, args):
                     elif k == "?":
                         help_open = True
                     elif k in ("<", ">"):  # previous / next body
+                        prev_body = args.body
                         args.body = cycle(BODY_NAMES, args.body, -1 if k == "<" else 1)
-                        tex = body_texture(args.body)
-                        bi = BODIES[args.body]
-                        args.top = bi.get("top", args.body.upper())
-                        args.bottom = bi.get("bottom", "")
-                        apply_scale()
+                        try:  # texture may need a download; never die if it fails
+                            tex = body_texture(args.body)
+                        except BaseException:
+                            _log_crash(args)
+                            args.body = prev_body
+                        else:
+                            bi = BODIES[args.body]
+                            args.top = bi.get("top", args.body.upper())
+                            args.bottom = bi.get("bottom", "")
+                            apply_scale()
                     elif k == "m":  # scale mode: fit -> sqrt -> real
                         args.scale = cycle(["fit", "sqrt", "real"], args.scale)
                         apply_scale()
