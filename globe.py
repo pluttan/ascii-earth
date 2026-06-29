@@ -661,15 +661,20 @@ def resolve_color(choice: str) -> str:
 
 
 def _parse_input(buf):
-    """Yield ('key', ch) and ('mouse', btn, x, y) events from a raw read."""
+    """Yield ('key', ch) and ('mouse', btn, x, y) events from a raw read.
+    Tolerant of truncated sequences: a fast mouse wheel floods events and a
+    256-byte read can cut one mid-way — that used to IndexError and kill the app."""
     i, n = 0, len(buf)
     while i < n:
         ch = buf[i]
         if ch == "\x1b" and buf[i + 1 : i + 2] == "[":
-            if buf[i + 2 : i + 3] == "<":  # SGR mouse: ESC[<b;x;y(M|m)
+            c2 = buf[i + 2 : i + 3]
+            if c2 == "<":  # SGR mouse: ESC[<b;x;y(M|m)
                 j = i + 3
                 while j < n and buf[j] not in "Mm":
                     j += 1
+                if j >= n:  # event cut off at the end of the buffer; stop here
+                    return
                 try:
                     b, x, y = buf[i + 3 : j].split(";")
                     yield ("mouse", int(b), int(x), int(y), buf[j])
@@ -677,8 +682,8 @@ def _parse_input(buf):
                     pass
                 i = j + 1
                 continue
-            if buf[i + 2 : i + 3] in "ABCD":  # arrow
-                yield ("key", "\x1b[" + buf[i + 2])
+            if c2 in ("A", "B", "C", "D"):  # arrow (empty c2 must not match)
+                yield ("key", "\x1b[" + c2)
                 i += 3
                 continue
             i += 1
@@ -755,7 +760,7 @@ def interactive(tex, args):
         if args.scale == "fit":  # zoom this body directly
             args.size = (min(args.size + 4, 4 * cols) if d > 0 else max(20, args.size - 4))
         else:  # zoom the shared scale -> every body scales together
-            args.scale_ref = max(2.0, min(args.scale_ref * (1.12 if d > 0 else 1 / 1.12), 2.0 * cols))
+            args.scale_ref = max(0.5, min(args.scale_ref * (1.12 if d > 0 else 1 / 1.12), 2.0 * cols))
             apply_scale()
 
     def rotate(dlon=0.0, dlat=0.0):
@@ -905,8 +910,12 @@ def interactive(tex, args):
             else:
                 timeout = None
             if select.select([fd], [], [], timeout)[0]:
-                buf = os.read(fd, 256).decode(errors="ignore")
-                for ev in _parse_input(buf):
+                buf = os.read(fd, 4096).decode(errors="ignore")
+                try:
+                    events = list(_parse_input(buf))
+                except Exception:
+                    events = []
+                for ev in events:
                     try:
                         handle_event(ev)
                     except KeyboardInterrupt:
