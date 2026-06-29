@@ -198,16 +198,77 @@ def _boost(r, g, b, gain=1.2, lift=8):
 SEA_DEEP, SEA_SHALLOW = (26, 78, 150), (120, 198, 226)
 
 
-def cell_color(rgb, is_ocean, bright, tint):
-    # Flat shading on purpose: a radial limb gradient made a bright "circle" on
-    # the open ocean. The disc reads as a sphere from the map itself.
-    if tint == "blue":
-        a, b = (OCEAN_RGB if is_ocean else LAND_RGB)
-        return _lerp(a, b, float(bright))
-    if is_ocean:
-        t = max(0.0, min(1.0, (float(bright) - 0.24) / 0.30))
-        return _lerp(SEA_DEEP, SEA_SHALLOW, t)
+def _lum(c):
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _sea_t(bright):
+    return max(0.0, min(1.0, (float(bright) - 0.24) / 0.30))
+
+
+def _colormap(v, stops):
+    v = max(0.0, min(1.0, v))
+    n = len(stops) - 1
+    f = v * n
+    i = min(int(f), n - 1)
+    return _lerp(stops[i], stops[i + 1], f - i)
+
+
+def _pal_natural(rgb, ocean, bright):
+    if ocean:
+        return _lerp(SEA_DEEP, SEA_SHALLOW, _sea_t(bright))
     return _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+
+
+def _pal_political(rgb, ocean, bright):
+    if ocean:
+        return _lerp((18, 92, 178), (150, 210, 238), _sea_t(bright))
+    r, g, b = _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+    return (r, min(255, int(g * 1.12)), b)  # punchier greens for a political map
+
+
+def _pal_blue(rgb, ocean, bright):
+    a, b = (OCEAN_RGB if ocean else LAND_RGB)
+    return _lerp(a, b, float(bright))
+
+
+def _mono(rgb, ocean, bright, lo, hi):
+    v = (_lum(_pal_natural(rgb, ocean, bright)) / 255.0) ** 0.85
+    return _lerp(lo, hi, v)
+
+
+def _pal_inferno(rgb, ocean, bright):
+    v = _lum(_pal_natural(rgb, ocean, bright)) / 255.0
+    return _colormap(v, [(0, 0, 4), (40, 11, 84), (139, 41, 129),
+                         (225, 82, 73), (252, 164, 38), (252, 255, 164)])
+
+
+def _pal_neon(rgb, ocean, bright):
+    if ocean:
+        return _lerp((30, 0, 50), (255, 40, 220), _sea_t(bright))
+    v = (_lum(_boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))) / 255.0) ** 0.8
+    return _lerp((0, 40, 45), (40, 255, 210), v)
+
+
+# Map-style schemes plus a pile of monochrome/false-colour looks.
+PALETTES = {
+    "natural": _pal_natural,
+    "political": _pal_political,
+    "blue": _pal_blue,
+    "green": lambda r, o, b: _mono(r, o, b, (0, 10, 2), (120, 255, 135)),
+    "amber": lambda r, o, b: _mono(r, o, b, (8, 4, 0), (255, 188, 60)),
+    "ice": lambda r, o, b: _mono(r, o, b, (4, 10, 30), (150, 205, 255)),
+    "mono": lambda r, o, b: _mono(r, o, b, (10, 10, 12), (240, 242, 245)),
+    "inferno": _pal_inferno,
+    "neon": _pal_neon,
+}
+PALETTE_NAMES = list(PALETTES)
+
+
+def cell_color(rgb, is_ocean, bright, palette):
+    # Flat shading on purpose: a radial gradient drew a bright "circle" on the
+    # open sea. Depth/relief come from the texture itself.
+    return PALETTES.get(palette, _pal_natural)(rgb, is_ocean, bright)
 
 
 # ==========================
@@ -247,7 +308,7 @@ def _night(col, f: float):
 # ==========================
 
 
-def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint, sun):
+def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette, sun):
     rx = size / 2.0
     ry = rx / aspect
     width = int(round(2 * rx)) + 2
@@ -274,7 +335,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint, s
                     glyph = ramp[idx[r, c]]
                     if glyph == " ":
                         glyph = "."
-                    col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], tint)
+                    col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], palette)
                     if illum is not None:
                         col = _night(col, float(illum[r, c]))
             else:
@@ -304,7 +365,7 @@ _BAYER = np.array(
 ) / 16.0
 
 
-def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint, sun):
+def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, sun):
     """Sub-pixel render: each cell is a 2x4 Braille dot matrix. Dots fill nearly
     solid (so the globe reads as a filled map); colour carries land/sea/ice."""
     width = int(round(size)) + 2
@@ -352,7 +413,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint, sun)
                     col = RING_RGB
                 else:
                     col = cell_color(
-                        rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), tint,
+                        rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), palette,
                     )
                     if illum_c is not None:
                         col = _night(col, float(illum_c[r, c]))
@@ -385,17 +446,18 @@ def _center(text, width, color):
 
 
 def build_frame(tex, args, status=None):
-    sun = getattr(args, "sun_pos", None)
+    # Recompute the sub-solar point every frame so day/night tracks the real sun.
+    sun = subsolar(datetime.datetime.now(datetime.timezone.utc)) if args.sun else None
     if args.glyphs == "braille":
         body, width = render_braille(
             tex, args.size, args.lon, args.lat, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint, sun,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
         )
     else:
         ramp = args.ramp or (ASCII_RAMP if args.glyphs == "ascii" else UNICODE_RAMP)
         body, width = render_ramp(
             tex, args.size, args.lon, args.lat, ramp, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint, sun,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
         )
     lines = []
     if not args.no_labels:
@@ -404,7 +466,8 @@ def build_frame(tex, args, status=None):
     if not args.no_labels:
         lines += ["", _center(args.bottom, width, args.color)]
     if status is not None:
-        lines.append(_center(status, width, args.color))
+        for sline in status.split("\n"):
+            lines.append(_center(sline, width, args.color))
     return "\n".join(lines)
 
 
@@ -418,7 +481,7 @@ def auto_size(aspect: float) -> int:
     # the disc is taller than the window the frame scrolls and "swims" on every
     # redraw, so be conservative on height.
     cols, rows = shutil.get_terminal_size((100, 40))
-    return max(20, min(cols - 2, int((rows - 9) * aspect)))
+    return max(20, min(cols - 2, int((rows - 10) * aspect)))
 
 
 def resolve_color(choice: str) -> str:
@@ -432,7 +495,9 @@ def resolve_color(choice: str) -> str:
 # ===  Interactive mode  ===
 # ==========================
 
-HELP = "drag/hjkl spin · wheel/+- zoom · g glyphs · space auto · r reset · q quit"
+KEYS = ("drag/hjkl move · wheel/+- zoom · g glyphs · p/P palette · c color · "
+        "n day/night · v stars · o ring · b labels · [] sat · ,. bright · "
+        "space spin · r reset · q quit")
 
 
 def _parse_input(buf):
@@ -471,19 +536,28 @@ def interactive(tex, args):
     if not os.isatty(fd):
         sys.exit("interactive mode needs a real terminal (stdin is not a tty)")
     old = termios.tcgetattr(fd)
-    start = (args.lon, args.lat, args.size)
+    snap = {k: getattr(args, k) for k in (
+        "lon", "lat", "size", "glyphs", "palette", "color", "sun",
+        "saturation", "gamma", "no_stars", "no_ring", "no_labels")}
     modes = ["braille", "unicode", "ascii"]
+    colors = ["truecolor", "256", "none"]
     autospin = False
     drag = None  # last (x, y) while dragging
+
+    def cycle(seq, cur, d=1):
+        return seq[(seq.index(cur) + d) % len(seq)] if cur in seq else seq[0]
+
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
-            status = f"{args.glyphs}  lon {args.lon:>4.0f} lat {args.lat:>3.0f} sz {args.size}  {HELP}"
-            frame = build_frame(tex, args, status).replace("\n", "\x1b[K\n")
+            state = (f"{args.glyphs} · {args.palette} · {args.color} · "
+                     f"sun {'on' if args.sun else 'off'} · sat {args.saturation:.1f} "
+                     f"gam {args.gamma:.2f} · lon {args.lon:.0f} lat {args.lat:.0f} sz {args.size}")
+            frame = build_frame(tex, args, state + "\n" + KEYS).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
-            timeout = (1.0 / max(args.fps, 1.0)) if autospin else None
+            timeout = (1.0 / max(args.fps, 1.0)) if (autospin or args.sun) else None
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
@@ -517,11 +591,35 @@ def interactive(tex, args):
                     elif k in ("-", "_"):
                         args.size = max(20, args.size - 4)
                     elif k == "g":
-                        args.glyphs = modes[(modes.index(args.glyphs) + 1) % len(modes)]
+                        args.glyphs = cycle(modes, args.glyphs)
+                    elif k == "p":
+                        args.palette = cycle(PALETTE_NAMES, args.palette)
+                    elif k == "P":
+                        args.palette = cycle(PALETTE_NAMES, args.palette, -1)
+                    elif k == "c":
+                        args.color = cycle(colors, args.color)
+                    elif k == "n":
+                        args.sun = not args.sun
+                    elif k == "v":
+                        args.no_stars = not args.no_stars
+                    elif k == "o":
+                        args.no_ring = not args.no_ring
+                    elif k == "b":
+                        args.no_labels = not args.no_labels
+                    elif k == "]":
+                        args.saturation = min(4.0, args.saturation + 0.1); set_color(args.saturation, args.gamma)
+                    elif k == "[":
+                        args.saturation = max(0.0, args.saturation - 0.1); set_color(args.saturation, args.gamma)
+                    elif k == ".":
+                        args.gamma = max(0.2, args.gamma - 0.05); set_color(args.saturation, args.gamma)
+                    elif k == ",":
+                        args.gamma = min(1.5, args.gamma + 0.05); set_color(args.saturation, args.gamma)
                     elif k == " ":
                         autospin = not autospin
                     elif k == "r":
-                        args.lon, args.lat, args.size = start
+                        for key, val in snap.items():
+                            setattr(args, key, val)
+                        set_color(args.saturation, args.gamma)
                         autospin = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
@@ -541,8 +639,8 @@ def interactive(tex, args):
 def main():
     p = argparse.ArgumentParser(description="UTF-8 Earth poster for the terminal")
     p.add_argument("--glyphs", choices=["braille", "unicode", "ascii"], default="braille")
-    p.add_argument("--tint", choices=["natural", "blue"], default="natural",
-                   help="natural = real map colours from the texture; blue = stylised")
+    p.add_argument("--palette", choices=PALETTE_NAMES, default="natural",
+                   help="colour scheme: " + ", ".join(PALETTE_NAMES))
     p.add_argument("--saturation", type=float, default=2.1, help="colour saturation (1 = none)")
     p.add_argument("--gamma", type=float, default=0.55, help="brightness gamma (<1 = brighter)")
     p.add_argument("--size", type=int, default=0, help="disc diameter in columns (0 = fit terminal)")
@@ -570,15 +668,12 @@ def main():
     # tilt the globe to the current seasonal declination.
     if args.sun:
         decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
-        args.sun_pos = (decl, sunlon)
         # Default view: put the day/night terminator across the centre (sun 90deg
         # to the side) so the division is actually visible; tilt to the season.
         if args.lon is None:
             args.lon = (math.degrees(sunlon) + 90.0 + 180.0) % 360.0 - 180.0
         if args.lat is None:
             args.lat = math.degrees(decl)
-    else:
-        args.sun_pos = None
     if args.lon is None:
         args.lon = -30.0
     if args.lat is None:
