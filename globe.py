@@ -40,8 +40,7 @@ _NASA_EARTH = (
 _SSS = "https://commons.wikimedia.org/wiki/Special:FilePath/Solarsystemscope_texture_2k_"
 
 BODIES = {
-    "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True,
-                "top": "THAT'S NO EARTH!", "bottom": "IT'S A SPACE STATION."},
+    "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True},
     "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False},
     "mercury": {"url": _SSS + "mercury.jpg", "file": "mercury.jpg", "ocean": False},
     "venus":   {"url": _SSS + "venus_atmosphere.jpg", "file": "venus.jpg", "ocean": False},
@@ -381,7 +380,7 @@ def render_ramp(tex, vw, vh, rx, ry, lon0, lat0, ramp, color, stars, ring, palet
     yy, xx = np.mgrid[0:height, 0:width]
     rr = ((xx - (width - 1) / 2) / rx) ** 2 + ((yy - (height - 1) / 2) / ry) ** 2
     ring_band = inside & (rr >= 0.975 * 0.975)
-    ring_m, ring_c = (_ring_overlay(width, height, rx, ry, lat0, rings)
+    ring_m, ring_c = (_ring_overlay(width, height, rx, ry, lon0, lat0, rings)
                       if rings else (None, None))
     ring_glyph = ramp[int(0.72 * (nramp - 1))]
 
@@ -432,10 +431,11 @@ _BAYER = np.array(
 ) / 16.0
 
 
-def _ring_overlay(width, height, rx, ry, lat0, rings):
+def _ring_overlay(width, height, rx, ry, lon0, lat0, rings):
     """(mask, colour) per cell for a planet's rings. Rings sit in the equatorial
     plane; tilt lat0 sets how open the ellipse is. Front arc draws over the disc,
-    back arc is hidden behind the sphere (proper depth occlusion)."""
+    back arc is hidden behind the sphere (proper depth occlusion). The azimuthal
+    clumping rotates with lon0 so the spin is actually visible."""
     t = math.radians(-lat0)
     s = math.sin(t)
     mask = np.zeros((height, width), dtype=bool)
@@ -445,6 +445,8 @@ def _ring_overlay(width, height, rx, ry, lat0, rings):
     cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
     NX, NY = np.meshgrid((np.arange(width) - cx) / rx, (np.arange(height) - cy) / ry)
     rho = np.sqrt(NX ** 2 + (NY / s) ** 2)              # radius in the ring plane
+    phi = np.arctan2(NY / s, NX)                         # azimuth in the ring plane
+    az = phi + math.radians(lon0)                        # spins with the planet
     inner, outer = rings["inner"], rings["outer"]
     band = (rho >= inner) & (rho <= outer)
     depth = -NY / math.tan(t)                            # +toward camera
@@ -456,8 +458,11 @@ def _ring_overlay(width, height, rx, ry, lat0, rings):
     rn = (rho - inner) / span                            # 0..1 across the ring
     bn = 0.40 + 0.60 * (0.5 + 0.5 * np.cos(rho * 17.0))  # sharp radial bands
     bn *= 0.7 + 0.3 * rn                                 # outer ring a touch brighter
+    # Irregular azimuthal clumps (several frequencies) so rotation reads clearly.
+    azmod = (0.60 + 0.22 * np.sin(az * 5.0 + 0.7) + 0.13 * np.sin(az * 13.0 + 2.1)
+             + 0.09 * np.sin(az * 29.0 + 4.0))
     gap = (rn > 0.58) & (rn < 0.66)                      # Cassini-ish division
-    shade = np.where(gap, 0.18, bn)
+    shade = np.where(gap, 0.18, bn) * np.clip(azmod, 0.30, 1.2)
     color = base[None, None, :] * shade[..., None]
     return mask, color
 
@@ -485,14 +490,17 @@ def render_braille(tex, vw, vh, rx_c, ry_c, lon0, lat0, color, stars, ring, pale
     wsum = np.clip(ins4.sum((1, 3)), 1.0, None)
     rgb_c = (rgb * inside[..., None]).reshape(height, 4, width, 2, 3).sum((1, 3)) / wsum[..., None]
     bright_c = (bright * inside).reshape(height, 4, width, 2).sum((1, 3)) / wsum
-    ocean_c = (rgb_c[..., 2] > rgb_c[..., 0]) & (rgb_c[..., 2] > rgb_c[..., 1])
+    # Respect the body's ocean flag: without it the Moon's bluish maria get
+    # mis-tagged as sea and painted blue.
+    ocean_c = (((rgb_c[..., 2] > rgb_c[..., 0]) & (rgb_c[..., 2] > rgb_c[..., 1]))
+               if ocean else np.zeros((height, width), dtype=bool))
     if sun:
         illum = terminator(lat, lon, *sun)
         illum_c = (illum * inside).reshape(height, 4, width, 2).sum((1, 3)) / wsum
     else:
         illum_c = None
 
-    ring_m, ring_c = (_ring_overlay(width, height, rx_c, ry_c, lat0, rings)
+    ring_m, ring_c = (_ring_overlay(width, height, rx_c, ry_c, lon0, lat0, rings)
                       if rings else (None, None))
 
     truecolor = color == "truecolor"
@@ -743,7 +751,7 @@ def interactive(tex, args):
                             continue
                         _, b, x, y, press = ev
                         if b == 64:
-                            args.size += 4
+                            args.size = min(args.size + 4, 4 * shutil.get_terminal_size((100, 40))[0])
                         elif b == 65:
                             args.size = max(20, args.size - 4)
                         elif press == "m":
@@ -780,7 +788,7 @@ def interactive(tex, args):
                     elif k in ("j", "\x1b[B"):
                         rotate(dlat=-args.step)
                     elif k in ("+", "="):
-                        args.size += 4
+                        args.size = min(args.size + 4, 4 * shutil.get_terminal_size((100, 40))[0])
                     elif k in ("-", "_"):
                         args.size = max(20, args.size - 4)
                     elif k == "g":
