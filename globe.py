@@ -159,25 +159,34 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     ].astype(np.float32)
     R, G, B = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     lum = 0.2126 * R + 0.7152 * G + 0.0722 * B
-    is_ocean = B > (R + 8)
+    is_ocean = (B > R) & (B > G)
     ocean_b = 0.24 + 0.30 * np.clip(lum / 80.0, 0.0, 1.0)
     land_b = 0.50 + 0.50 * np.clip((lum - 55.0) / 190.0, 0.0, 1.0)
-    bright = np.where(is_ocean, ocean_b, land_b)
-    bright = np.clip(bright * (0.62 + 0.38 * z), 0.0, 1.0)
+    # No z term here: a radial brightness gradient drew a bright "circle" on the
+    # open sea. Depth/relief come from the texture luminance alone.
+    bright = np.clip(np.where(is_ocean, ocean_b, land_b), 0.0, 1.0)
     return inside, z, bright, is_ocean, rgb
 
 
-# Gamma < 1 lifts the shadows: dark Blue Marble ocean becomes a bright blue.
-_GAMMA = 0.6
-_GLUT = [int(round(255 * (i / 255.0) ** _GAMMA)) for i in range(256)]
+# Saturation + a gamma LUT (<1 lifts shadows so dark ocean reads bright).
+# Both are tunable from the CLI via set_color().
+_SAT = 2.0
+_GLUT = [int(round(255 * (i / 255.0) ** 0.6)) for i in range(256)]
 
 
-def _boost(r, g, b, sat=2.0, gain=1.2, lift=8):
+def set_color(saturation: float, gamma: float):
+    global _SAT, _GLUT
+    _SAT = saturation
+    g = max(0.05, gamma)
+    _GLUT = [int(round(255 * (i / 255.0) ** g)) for i in range(256)]
+
+
+def _boost(r, g, b, gain=1.2, lift=8):
     """Saturate texture colour, then gamma-lift so the map reads bright."""
     m = (r + g + b) / 3.0
-    r = max(0, min(255, int((m + (r - m) * sat) * gain + lift)))
-    g = max(0, min(255, int((m + (g - m) * sat) * gain + lift)))
-    b = max(0, min(255, int((m + (b - m) * sat) * gain + lift)))
+    r = max(0, min(255, int((m + (r - m) * _SAT) * gain + lift)))
+    g = max(0, min(255, int((m + (g - m) * _SAT) * gain + lift)))
+    b = max(0, min(255, int((m + (b - m) * _SAT) * gain + lift)))
     return (_GLUT[r], _GLUT[g], _GLUT[b])
 
 
@@ -274,6 +283,14 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
     fill = np.clip(0.5 + 0.5 * bright, 0.0, 1.0)  # near-solid; modulate texture
     dot = inside & (fill > thr)
 
+    # Supersample colour over each cell's 2x4 sub-pixels: averages out stray
+    # single land pixels (sea "spots") and the nearest-sample smear at the limb.
+    ins4 = inside.reshape(height, 4, width, 2).astype(np.float32)
+    wsum = np.clip(ins4.sum((1, 3)), 1.0, None)
+    rgb_c = (rgb * inside[..., None]).reshape(height, 4, width, 2, 3).sum((1, 3)) / wsum[..., None]
+    bright_c = (bright * inside).reshape(height, 4, width, 2).sum((1, 3)) / wsum
+    ocean_c = (rgb_c[..., 2] > rgb_c[..., 0]) & (rgb_c[..., 2] > rgb_c[..., 1])
+
     truecolor = color == "truecolor"
     mono = color == "none"
     out = []
@@ -292,7 +309,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
                     col = RING_RGB
                 else:
                     col = cell_color(
-                        rgb[cy, cx], bool(is_ocean[cy, cx]), float(bright[cy, cx]), tint,
+                        rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), tint,
                     )
                 glyph = chr(0x2800 + bits)
             else:
@@ -480,6 +497,8 @@ def main():
     p.add_argument("--glyphs", choices=["braille", "unicode", "ascii"], default="braille")
     p.add_argument("--tint", choices=["natural", "blue"], default="natural",
                    help="natural = real map colours from the texture; blue = stylised")
+    p.add_argument("--saturation", type=float, default=2.1, help="colour saturation (1 = none)")
+    p.add_argument("--gamma", type=float, default=0.55, help="brightness gamma (<1 = brighter)")
     p.add_argument("--size", type=int, default=0, help="disc diameter in columns (0 = fit terminal)")
     p.add_argument("--lon", type=float, default=-30.0, help="central longitude (spin)")
     p.add_argument("--lat", type=float, default=18.0, help="axial tilt / view latitude")
@@ -499,6 +518,7 @@ def main():
     args = p.parse_args()
 
     args.color = resolve_color(args.color)
+    set_color(args.saturation, args.gamma)
     if args.size <= 0:
         args.size = auto_size(args.aspect)
     tex = load_texture(fetch_texture())
