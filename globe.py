@@ -331,6 +331,9 @@ def _night(col, f: float, ocean: bool = False):
     )
 
 
+FOLLOW_STEP = 0.3  # degrees/frame: slow but visible spin in sun-locked follow
+
+
 # ==========================
 # ===  Renderers         ===
 # ==========================
@@ -476,12 +479,10 @@ def _center(text, width, color):
 def build_frame(tex, args, status=None):
     lon0, lat0 = args.lon, args.lat
     if getattr(args, "follow", False):
-        # Sun-locked view: centre the disc on the real sub-solar point. Earth
-        # turns under it at the real rate (sub-solar longitude moves 15deg/h ->
-        # exactly one turn per 24h), so we always see the day side.
-        decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
-        lat0, lon0 = math.degrees(decl), math.degrees(sunlon)
-        sun = (decl, sunlon)
+        # Sun-locked view: the sun is pinned to the screen centre, so the lit
+        # (day) side always faces us — we never see night. The globe itself
+        # spins (advanced in the loop), continents pass through noon.
+        sun = (math.radians(lat0), math.radians(lon0))
     elif args.sun:
         # Recompute every frame so day/night tracks the real sun.
         sun = subsolar(datetime.datetime.now(datetime.timezone.utc))
@@ -579,76 +580,81 @@ def interactive(tex, args):
     colors = ["truecolor", "256", "none"]
     autospin = False
     drag = None  # last (x, y) while dragging
-    menu_open = False
-    menu_i = 0
-    PARAMS = ["palette", "glyphs", "color", "day/night", "follow sun",
-              "stars", "ring", "labels", "saturation", "brightness"]
+    help_open = False
+    HELP_LINES = [
+        "ascii-earth  —  hotkeys",
+        "",
+        "arrows / h j k l    rotate   (disabled in follow)",
+        "+   -               zoom",
+        "space               auto-spin",
+        "g                   glyph mode  (braille / unicode / ascii)",
+        "p   /   P           palette  next / prev",
+        "c                   colour mode  (truecolor / 256 / none)",
+        "n                   day / night  (real sun)",
+        "f                   follow sun  (locked day side, slow spin)",
+        "s                   stars on / off",
+        "o                   ring on / off",
+        "b                   labels on / off",
+        "[   ]               saturation  -  /  +",
+        ",   .               brightness  darker / lighter",
+        "r                   reset all",
+        "?                   show / hide this list",
+        "q  /  esc           quit",
+    ]
 
     def cycle(seq, cur, d=1):
         return seq[(seq.index(cur) + d) % len(seq)] if cur in seq else seq[0]
 
-    def mval(name):
-        return {
-            "palette": args.palette, "glyphs": args.glyphs, "color": args.color,
-            "day/night": "on" if args.sun else "off",
-            "follow sun": "on" if args.follow else "off",
-            "stars": "off" if args.no_stars else "on",
-            "ring": "off" if args.no_ring else "on",
-            "labels": "off" if args.no_labels else "on",
-            "saturation": f"{args.saturation:.1f}", "brightness": f"{args.gamma:.2f}",
-        }[name]
-
-    def mchange(name, d):
+    def toggle_follow():
         nonlocal autospin
-        if name == "palette":
-            args.palette = cycle(PALETTE_NAMES, args.palette, d)
-        elif name == "glyphs":
-            args.glyphs = cycle(modes, args.glyphs, d)
-        elif name == "color":
-            args.color = cycle(colors, args.color, d)
-        elif name == "day/night":  # real-time sun tracking; planet does not spin
-            args.sun = not args.sun
-        elif name == "follow sun":  # sun-locked view, globe turns under it
-            args.follow = not args.follow
-            if args.follow:
-                decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
-                args.lat, args.lon = math.degrees(decl), math.degrees(sunlon)
-                args.sun, autospin = False, False
-        elif name == "stars":
-            args.no_stars = not args.no_stars
-        elif name == "ring":
-            args.no_ring = not args.no_ring
-        elif name == "labels":
-            args.no_labels = not args.no_labels
-        elif name == "saturation":
-            args.saturation = max(0.0, min(4.0, args.saturation + 0.1 * d))
-            set_color(args.saturation, args.gamma)
-        elif name == "brightness":
-            args.gamma = max(0.2, min(1.5, args.gamma - 0.05 * d))
-            set_color(args.saturation, args.gamma)
+        args.follow = not args.follow
+        if args.follow:
+            decl, _ = subsolar(datetime.datetime.now(datetime.timezone.utc))
+            args.lat = math.degrees(decl)  # seasonal tilt; longitude keeps spinning
+            args.sun, autospin = False, False
+
+    def rotate(dlon=0.0, dlat=0.0):
+        if args.follow:  # rotation is automatic in follow; manual is disabled
+            return
+        if dlon:
+            args.lon = (args.lon + dlon) % 360
+        if dlat:
+            args.lat = max(-90, min(90, args.lat + dlat))
 
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
-            if menu_open:
-                p = PARAMS[menu_i]
-                bar = (f"  ‹ {p}: {mval(p)} ›     up/down: pick   left/right: change   "
-                       f"?: close   q: quit")
+            if help_open:
+                cols, rows = shutil.get_terminal_size((80, 40))
+                pad = max(0, (rows - len(HELP_LINES)) // 2)
+                lead = max(0, (cols - 48) // 2)
+                out = ["\x1b[H"] + ["\x1b[K\n"] * pad
+                for ln in HELP_LINES:
+                    out.append(" " * lead + ln + "\x1b[K\n")
+                sys.stdout.write("".join(out) + "\x1b[J")
+                sys.stdout.flush()
             else:
-                bar = (f"  {args.palette} · sun {'on' if args.sun else 'off'} · sz {args.size}"
-                       f"     drag/arrows: rotate   wheel/+-: zoom   space: spin   "
-                       f"?: settings   q: quit")
-            frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
-            sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
-            sys.stdout.flush()
-            # spin needs full fps; sun/follow move in real time, redraw ~1/s
-            timeout = ((1.0 / max(args.fps, 1.0)) if autospin
-                       else (1.0 if (args.sun or args.follow) else None))
+                bar = (f"  {args.palette} · {args.glyphs} · {args.color} · "
+                       f"sun {'on' if args.sun else 'off'} · follow {'on' if args.follow else 'off'} · "
+                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     ? keys · q quit")
+                frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
+                sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
+                sys.stdout.flush()
+            if help_open:
+                timeout = None
+            elif autospin or args.follow:
+                timeout = 1.0 / max(args.fps, 1.0)
+            elif args.sun:
+                timeout = 1.0
+            else:
+                timeout = None
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
                     if ev[0] == "mouse":
+                        if help_open:
+                            continue
                         _, b, x, y, press = ev
                         if b == 64:
                             args.size += 4
@@ -656,43 +662,61 @@ def interactive(tex, args):
                             args.size = max(20, args.size - 4)
                         elif press == "m":
                             drag = None
-                        elif b in (32, 0):  # left press / drag
+                        elif b in (32, 0) and not args.follow:  # drag (off in follow)
                             if drag is not None:
                                 args.lon = (args.lon - (x - drag[0]) * 2) % 360
                                 args.lat = max(-90, min(90, args.lat + (y - drag[1]) * 2))
                             drag = (x, y)
                         continue
                     k = ev[1]
-                    if menu_open:
-                        if k in ("?", "\x1b"):
-                            menu_open = False
-                        elif k == "q":
+                    if help_open:
+                        if k == "q":
                             raise KeyboardInterrupt
-                        elif k in ("k", "\x1b[A"):
-                            menu_i = (menu_i - 1) % len(PARAMS)
-                        elif k in ("j", "\x1b[B"):
-                            menu_i = (menu_i + 1) % len(PARAMS)
-                        elif k in ("h", "\x1b[D"):
-                            mchange(PARAMS[menu_i], -1)
-                        elif k in ("l", "\x1b[C"):
-                            mchange(PARAMS[menu_i], 1)
+                        help_open = False  # any key closes the list
+                        sys.stdout.write("\x1b[2J")
                         continue
                     if k in ("q", "\x1b"):
                         raise KeyboardInterrupt
                     elif k == "?":
-                        menu_open = True
+                        help_open = True
                     elif k in ("h", "\x1b[D"):
-                        args.lon = (args.lon - args.step) % 360
+                        rotate(dlon=-args.step)
                     elif k in ("l", "\x1b[C"):
-                        args.lon = (args.lon + args.step) % 360
+                        rotate(dlon=args.step)
                     elif k in ("k", "\x1b[A"):
-                        args.lat = min(90, args.lat + args.step)
+                        rotate(dlat=args.step)
                     elif k in ("j", "\x1b[B"):
-                        args.lat = max(-90, args.lat - args.step)
+                        rotate(dlat=-args.step)
                     elif k in ("+", "="):
                         args.size += 4
                     elif k in ("-", "_"):
                         args.size = max(20, args.size - 4)
+                    elif k == "g":
+                        args.glyphs = cycle(modes, args.glyphs)
+                    elif k == "p":
+                        args.palette = cycle(PALETTE_NAMES, args.palette)
+                    elif k == "P":
+                        args.palette = cycle(PALETTE_NAMES, args.palette, -1)
+                    elif k == "c":
+                        args.color = cycle(colors, args.color)
+                    elif k == "n":
+                        args.sun = not args.sun
+                    elif k == "f":
+                        toggle_follow()
+                    elif k == "s":
+                        args.no_stars = not args.no_stars
+                    elif k == "o":
+                        args.no_ring = not args.no_ring
+                    elif k == "b":
+                        args.no_labels = not args.no_labels
+                    elif k == "]":
+                        args.saturation = min(4.0, args.saturation + 0.1); set_color(args.saturation, args.gamma)
+                    elif k == "[":
+                        args.saturation = max(0.0, args.saturation - 0.1); set_color(args.saturation, args.gamma)
+                    elif k == ".":
+                        args.gamma = max(0.2, args.gamma - 0.05); set_color(args.saturation, args.gamma)
+                    elif k == ",":
+                        args.gamma = min(1.5, args.gamma + 0.05); set_color(args.saturation, args.gamma)
                     elif k == " ":
                         autospin = not autospin
                     elif k == "r":
@@ -700,9 +724,10 @@ def interactive(tex, args):
                             setattr(args, key, val)
                         set_color(args.saturation, args.gamma)
                         autospin = False
-                        menu_open = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
+            elif args.follow:
+                args.lon = (args.lon + FOLLOW_STEP) % 360
     except KeyboardInterrupt:
         pass
     finally:
@@ -775,14 +800,14 @@ def main():
     if not (args.spin or args.follow):
         print(build_frame(tex, args))
         return
-    # follow turns at the real 24h rate (driven by the clock in build_frame), so
-    # it only needs an occasional redraw; spin animates at fps.
-    delay = 1.0 if (args.follow and not args.spin) else 1.0 / max(args.fps, 1.0)
+    delay = 1.0 / max(args.fps, 1.0)
     try:
         sys.stdout.write("\x1b[2J\x1b[?25l")
         while True:
             if args.spin:
                 args.lon = (args.lon + args.step) % 360
+            elif args.follow:
+                args.lon = (args.lon + FOLLOW_STEP) % 360
             frame = build_frame(tex, args).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
