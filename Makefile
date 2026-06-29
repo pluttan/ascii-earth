@@ -1,4 +1,8 @@
-VENV := venv
+# venv lives in the user cache, NOT in the project tree. The project is served
+# from the Mac over sshfs, where `python -m venv` can't create its symlinks and
+# pip would crawl through ssh for every file. Caching it on the local disk fixes
+# both, and stays per-project + portable (works on pcomp and on the Mac itself).
+VENV := $(HOME)/.cache/ascii-earth/venv
 PY   := $(VENV)/bin/python3.12
 PIP  := $(VENV)/bin/pip
 
