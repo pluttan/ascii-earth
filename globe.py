@@ -167,9 +167,26 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     return inside, z, bright, is_ocean, rgb
 
 
-def _cell_color(is_ocean, bright):
-    a, b = (OCEAN_RGB if is_ocean else LAND_RGB)
-    return _lerp(a, b, float(bright))
+def _boost(r, g, b, sat=1.9, gain=1.35, lift=20):
+    """Push texture colour toward map-like saturation + brightness. Blue Marble
+    is dark, so lift the shadows or the ocean reads near-black."""
+    m = (r + g + b) / 3.0
+    r, g, b = m + (r - m) * sat, m + (g - m) * sat, m + (b - m) * sat
+    return (
+        max(0, min(255, int(r * gain + lift))),
+        max(0, min(255, int(g * gain + lift))),
+        max(0, min(255, int(b * gain + lift))),
+    )
+
+
+def cell_color(rgb, is_ocean, bright, z, tint):
+    shade = 0.64 + 0.36 * z  # mild limb darkening; keep the rim from going black
+    if tint == "blue":
+        a, b = (OCEAN_RGB if is_ocean else LAND_RGB)
+        c = _lerp(a, b, float(bright))
+    else:  # natural map colours straight from the Blue Marble texture
+        c = _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+    return (int(c[0] * shade), int(c[1] * shade), int(c[2] * shade))
 
 
 # ==========================
@@ -177,12 +194,12 @@ def _cell_color(is_ocean, bright):
 # ==========================
 
 
-def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect):
+def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint):
     rx = size / 2.0
     ry = rx / aspect
     width = int(round(2 * rx)) + 2
     height = int(round(2 * ry)) + 2
-    inside, z, bright, is_ocean, _ = _project(width, height, rx, ry, lon0, lat0, tex)
+    inside, z, bright, is_ocean, rgb = _project(width, height, rx, ry, lon0, lat0, tex)
     nramp = len(ramp)
     idx = np.clip((bright * (nramp - 1)).round().astype(int), 0, nramp - 1)
     # limb ring: inside but near the rim
@@ -203,7 +220,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect):
                     glyph = ramp[idx[r, c]]
                     if glyph == " ":
                         glyph = "."
-                    col = _cell_color(is_ocean[r, c], bright[r, c])
+                    col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], z[r, c], tint)
             else:
                 star = _star_at(r, c, stars)
                 if star is None:
@@ -231,21 +248,22 @@ _BAYER = np.array(
 ) / 16.0
 
 
-def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect):
-    """Sub-pixel render: each cell is a 2x4 Braille dot matrix dithered by
-    brightness. Highest detail; one glyph per cell, coloured per cell."""
+def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
+    """Sub-pixel render: each cell is a 2x4 Braille dot matrix. Dots fill nearly
+    solid (so the globe reads as a filled map); colour carries land/sea/ice."""
     width = int(round(size)) + 2
     height = int(round(size / aspect)) + 2
     sw, sh = width * 2, height * 4
     rx, ry = sw / 2.0, sh / 2.0
-    inside, z, bright, is_ocean, _ = _project(sw, sh, rx, ry, lon0, lat0, tex)
+    inside, z, bright, is_ocean, rgb = _project(sw, sh, rx, ry, lon0, lat0, tex)
 
     yy, xx = np.mgrid[0:sh, 0:sw]
     rr = ((xx - (sw - 1) / 2) / rx) ** 2 + ((yy - (sh - 1) / 2) / ry) ** 2
     ring_band = inside & (rr >= 0.985 * 0.985)
 
     thr = _BAYER[yy % 4, xx % 4]
-    dot = inside & (bright > thr)
+    fill = np.clip(0.5 + 0.5 * bright, 0.0, 1.0)  # near-solid; modulate texture
+    dot = inside & (fill > thr)
 
     truecolor = color == "truecolor"
     mono = color == "none"
@@ -264,7 +282,10 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect):
                 if ring and ring_band[cy, cx] and not inside[cy, cx]:
                     col = RING_RGB
                 else:
-                    col = _cell_color(bool(is_ocean[cy, cx]), float(bright[cy, cx]))
+                    col = cell_color(
+                        rgb[cy, cx], bool(is_ocean[cy, cx]),
+                        float(bright[cy, cx]), float(z[cy, cx]), tint,
+                    )
                 glyph = chr(0x2800 + bits)
             else:
                 star = _star_at(r, c, stars) if not inside[cy, cx] else None
@@ -297,13 +318,13 @@ def build_frame(tex, args, status=None):
     if args.glyphs == "braille":
         body, width = render_braille(
             tex, args.size, args.lon, args.lat, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint,
         )
     else:
         ramp = args.ramp or (ASCII_RAMP if args.glyphs == "ascii" else UNICODE_RAMP)
         body, width = render_ramp(
             tex, args.size, args.lon, args.lat, ramp, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint,
         )
     lines = []
     if not args.no_labels:
@@ -377,7 +398,7 @@ def interactive(tex, args):
         sys.exit("interactive mode needs a real terminal (stdin is not a tty)")
     old = termios.tcgetattr(fd)
     start = (args.lon, args.lat, args.size)
-    modes = ["unicode", "braille", "ascii"]
+    modes = ["braille", "unicode", "ascii"]
     autospin = False
     drag = None  # last (x, y) while dragging
     try:
@@ -444,7 +465,9 @@ def interactive(tex, args):
 
 def main():
     p = argparse.ArgumentParser(description="UTF-8 Earth poster for the terminal")
-    p.add_argument("--glyphs", choices=["unicode", "braille", "ascii"], default="unicode")
+    p.add_argument("--glyphs", choices=["braille", "unicode", "ascii"], default="braille")
+    p.add_argument("--tint", choices=["natural", "blue"], default="natural",
+                   help="natural = real map colours from the texture; blue = stylised")
     p.add_argument("--size", type=int, default=0, help="disc diameter in columns (0 = fit terminal)")
     p.add_argument("--lon", type=float, default=-30.0, help="central longitude (spin)")
     p.add_argument("--lat", type=float, default=18.0, help="axial tilt / view latitude")
