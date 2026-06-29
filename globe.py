@@ -65,7 +65,7 @@ def scaled_size(scale, body, ref, cols):
         return None
     ratio = BODIES[body].get("r", _EARTH_R) / _EARTH_R
     s = ref * (ratio ** 0.5) if scale == "sqrt" else ref * ratio
-    return int(max(8, min(s, 6 * cols)))
+    return int(max(5, min(s, 6 * cols)))
 
 # Descriptive UA: Wikimedia blocks generic/empty agents.
 _UA = "ascii-earth/1.0 (terminal globe renderer; +https://github.com/pluttan/ascii-earth)"
@@ -680,7 +680,7 @@ def interactive(tex, args):
     snap = {k: getattr(args, k) for k in (
         "lon", "lat", "size", "glyphs", "palette", "color", "sun", "follow",
         "saturation", "gamma", "no_stars", "no_ring", "no_labels", "body", "top",
-        "bottom", "scale", "no_rings")}
+        "bottom", "scale", "no_rings", "scale_ref")}
     modes = ["braille", "unicode", "ascii"]
     colors = ["truecolor", "256", "none"]
     autospin = False
@@ -723,7 +723,7 @@ def interactive(tex, args):
 
     def apply_scale():
         cols = shutil.get_terminal_size((100, 40))[0]
-        s = scaled_size(args.scale, args.body, auto_size(args.aspect), cols)
+        s = scaled_size(args.scale, args.body, args.scale_ref, cols)
         if s is None:  # fit
             args.size = auto_size(args.aspect)
             ri = BODIES[args.body].get("rings")
@@ -731,6 +731,14 @@ def interactive(tex, args):
                 args.size = int(args.size / ri["outer"])
         else:
             args.size = s
+
+    def zoom(d):
+        cols = shutil.get_terminal_size((100, 40))[0]
+        if args.scale == "fit":  # zoom this body directly
+            args.size = (min(args.size + 4, 4 * cols) if d > 0 else max(20, args.size - 4))
+        else:  # zoom the shared scale -> every body scales together
+            args.scale_ref = max(4.0, min(args.scale_ref * (1.12 if d > 0 else 1 / 1.12), 6 * cols))
+            apply_scale()
 
     def rotate(dlon=0.0, dlat=0.0):
         if args.follow:  # rotation is automatic in follow; manual is disabled
@@ -754,9 +762,9 @@ def interactive(tex, args):
                 sys.stdout.write("".join(out) + "\x1b[J")
                 sys.stdout.flush()
             else:
-                bar = (f"  {args.body} · {args.palette} · {args.glyphs} · "
+                bar = (f"  {args.body} · {args.scale} · sz {args.size} · {args.palette} · "
                        f"sun {'on' if args.sun else 'off'} · follow {'on' if args.follow else 'off'} · "
-                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     <>body · ? keys · q quit")
+                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     <>body · m scale · ? keys · q")
                 frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
                 sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
                 sys.stdout.flush()
@@ -776,9 +784,9 @@ def interactive(tex, args):
                             continue
                         _, b, x, y, press = ev
                         if b == 64:
-                            args.size = min(args.size + 4, 4 * shutil.get_terminal_size((100, 40))[0])
+                            zoom(1)
                         elif b == 65:
-                            args.size = max(20, args.size - 4)
+                            zoom(-1)
                         elif press == "m":
                             drag = None
                         elif b in (32, 0) and not args.follow:  # drag (off in follow)
@@ -820,9 +828,9 @@ def interactive(tex, args):
                     elif k in ("j", "\x1b[B"):
                         rotate(dlat=-args.step)
                     elif k in ("+", "="):
-                        args.size = min(args.size + 4, 4 * shutil.get_terminal_size((100, 40))[0])
+                        zoom(1)
                     elif k in ("-", "_"):
-                        args.size = max(20, args.size - 4)
+                        zoom(-1)
                     elif k == "g":
                         args.glyphs = cycle(modes, args.glyphs)
                     elif k == "p":
@@ -930,12 +938,14 @@ def main():
         args.lon = -30.0
     if args.lat is None:
         args.lat = 18.0
+    # scale_ref = the common scale knob for real/sqrt modes (zoom adjusts it, so
+    # all bodies shrink/grow together and keep their relative sizes).
+    args.scale_ref = float(auto_size(args.aspect))
     if args.size <= 0:
         cols = shutil.get_terminal_size((100, 40))[0]
-        ref = auto_size(args.aspect)
-        s = scaled_size(args.scale, args.body, ref, cols)
+        s = scaled_size(args.scale, args.body, args.scale_ref, cols)
         if s is None:  # fit mode
-            args.size = ref
+            args.size = auto_size(args.aspect)
             if info.get("rings") and not args.no_rings:  # leave room for the rings
                 args.size = int(args.size / info["rings"]["outer"])
         else:
