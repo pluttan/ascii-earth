@@ -40,21 +40,32 @@ _NASA_EARTH = (
 _SSS = "https://commons.wikimedia.org/wiki/Special:FilePath/Solarsystemscope_texture_2k_"
 
 BODIES = {
-    "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True},
-    "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False},
-    "mercury": {"url": _SSS + "mercury.jpg", "file": "mercury.jpg", "ocean": False},
-    "venus":   {"url": _SSS + "venus_atmosphere.jpg", "file": "venus.jpg", "ocean": False},
-    "moon":    {"url": _SSS + "moon.jpg", "file": "moon.jpg", "ocean": False},
-    "mars":    {"url": _SSS + "mars.jpg", "file": "mars.jpg", "ocean": False},
-    "jupiter": {"url": _SSS + "jupiter.jpg", "file": "jupiter.jpg", "ocean": False},
-    "saturn":  {"url": _SSS + "saturn.jpg", "file": "saturn.jpg", "ocean": False,
+    "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True, "r": 6371},
+    "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False, "r": 696340},
+    "mercury": {"url": _SSS + "mercury.jpg", "file": "mercury.jpg", "ocean": False, "r": 2440},
+    "venus":   {"url": _SSS + "venus_atmosphere.jpg", "file": "venus.jpg", "ocean": False, "r": 6052},
+    "moon":    {"url": _SSS + "moon.jpg", "file": "moon.jpg", "ocean": False, "r": 1737},
+    "mars":    {"url": _SSS + "mars.jpg", "file": "mars.jpg", "ocean": False, "r": 3390},
+    "jupiter": {"url": _SSS + "jupiter.jpg", "file": "jupiter.jpg", "ocean": False, "r": 69911},
+    "saturn":  {"url": _SSS + "saturn.jpg", "file": "saturn.jpg", "ocean": False, "r": 58232,
                 "rings": {"inner": 1.24, "outer": 2.30, "color": (220, 200, 165)}},
-    "uranus":  {"url": _SSS + "uranus.jpg", "file": "uranus.jpg", "ocean": False,
+    "uranus":  {"url": _SSS + "uranus.jpg", "file": "uranus.jpg", "ocean": False, "r": 25362,
                 "rings": {"inner": 1.55, "outer": 1.95, "color": (120, 140, 150)}},
-    "neptune": {"url": _SSS + "neptune.jpg", "file": "neptune.jpg", "ocean": False},
-    "ceres":   {"url": _SSS + "ceres_fictional.jpg", "file": "ceres.jpg", "ocean": False},
+    "neptune": {"url": _SSS + "neptune.jpg", "file": "neptune.jpg", "ocean": False, "r": 24622},
+    "ceres":   {"url": _SSS + "ceres_fictional.jpg", "file": "ceres.jpg", "ocean": False, "r": 473},
 }
 BODY_NAMES = list(BODIES)
+_EARTH_R = 6371.0
+
+
+def scaled_size(scale, body, ref, cols):
+    """Disc diameter for a body under a scaling mode. 'fit' returns None (use
+    auto-fit); 'sqrt'/'real' size it by real radius relative to Earth."""
+    if scale == "fit":
+        return None
+    ratio = BODIES[body].get("r", _EARTH_R) / _EARTH_R
+    s = ref * (ratio ** 0.5) if scale == "sqrt" else ref * ratio
+    return int(max(8, min(s, 6 * cols)))
 
 # Descriptive UA: Wikimedia blocks generic/empty agents.
 _UA = "ascii-earth/1.0 (terminal globe renderer; +https://github.com/pluttan/ascii-earth)"
@@ -573,7 +584,7 @@ def build_frame(tex, args, status=None):
         sun = None
     binfo = BODIES.get(getattr(args, "body", "earth"), {})
     ocean = binfo.get("ocean", True)
-    rings = binfo.get("rings")
+    rings = None if getattr(args, "no_rings", False) else binfo.get("rings")
 
     # Viewport = the whole terminal. Captions glue to the top and bottom rows,
     # status (interactive) to the very last row; the disc fills the middle. The
@@ -668,7 +679,8 @@ def interactive(tex, args):
     old = termios.tcgetattr(fd)
     snap = {k: getattr(args, k) for k in (
         "lon", "lat", "size", "glyphs", "palette", "color", "sun", "follow",
-        "saturation", "gamma", "no_stars", "no_ring", "no_labels", "body", "top", "bottom")}
+        "saturation", "gamma", "no_stars", "no_ring", "no_labels", "body", "top",
+        "bottom", "scale", "no_rings")}
     modes = ["braille", "unicode", "ascii"]
     colors = ["truecolor", "256", "none"]
     autospin = False
@@ -678,6 +690,8 @@ def interactive(tex, args):
         "ascii-earth  —  hotkeys",
         "",
         "<   /   >           previous / next body  (planets, moon, sun)",
+        "m                   scale mode  (fit / sqrt / real radius)",
+        "R                   planetary rings on / off",
         "arrows / h j k l    rotate   (disabled in follow)",
         "+   -               zoom",
         "space               auto-spin",
@@ -706,6 +720,17 @@ def interactive(tex, args):
             decl, _ = subsolar(datetime.datetime.now(datetime.timezone.utc))
             args.lat = math.degrees(decl)  # seasonal tilt; longitude keeps spinning
             args.sun, autospin = False, False
+
+    def apply_scale():
+        cols = shutil.get_terminal_size((100, 40))[0]
+        s = scaled_size(args.scale, args.body, auto_size(args.aspect), cols)
+        if s is None:  # fit
+            args.size = auto_size(args.aspect)
+            ri = BODIES[args.body].get("rings")
+            if ri and not args.no_rings:
+                args.size = int(args.size / ri["outer"])
+        else:
+            args.size = s
 
     def rotate(dlon=0.0, dlat=0.0):
         if args.follow:  # rotation is automatic in follow; manual is disabled
@@ -779,6 +804,13 @@ def interactive(tex, args):
                         bi = BODIES[args.body]
                         args.top = bi.get("top", args.body.upper())
                         args.bottom = bi.get("bottom", "")
+                        apply_scale()
+                    elif k == "m":  # scale mode: fit -> sqrt -> real
+                        args.scale = cycle(["fit", "sqrt", "real"], args.scale)
+                        apply_scale()
+                    elif k == "R":  # planetary rings on / off
+                        args.no_rings = not args.no_rings
+                        apply_scale()
                     elif k in ("h", "\x1b[D"):
                         rotate(dlon=-args.step)
                     elif k in ("l", "\x1b[C"):
@@ -843,6 +875,9 @@ def main():
     p = argparse.ArgumentParser(description="UTF-8 planet renderer for the terminal")
     p.add_argument("--body", choices=BODY_NAMES, default="earth",
                    help="celestial body: " + ", ".join(BODY_NAMES))
+    p.add_argument("--scale", choices=["fit", "sqrt", "real"], default="fit",
+                   help="fit each body, or size by real radius (sqrt = compressed)")
+    p.add_argument("--no-rings", action="store_true", help="hide planetary rings")
     p.add_argument("--glyphs", choices=["braille", "unicode", "ascii"], default="braille")
     p.add_argument("--palette", choices=PALETTE_NAMES, default="natural",
                    help="colour scheme: " + ", ".join(PALETTE_NAMES))
@@ -896,9 +931,15 @@ def main():
     if args.lat is None:
         args.lat = 18.0
     if args.size <= 0:
-        args.size = auto_size(args.aspect)
-        if info.get("rings"):  # leave room for the rings
-            args.size = int(args.size / info["rings"]["outer"])
+        cols = shutil.get_terminal_size((100, 40))[0]
+        ref = auto_size(args.aspect)
+        s = scaled_size(args.scale, args.body, ref, cols)
+        if s is None:  # fit mode
+            args.size = ref
+            if info.get("rings") and not args.no_rings:  # leave room for the rings
+                args.size = int(args.size / info["rings"]["outer"])
+        else:
+            args.size = s
     tex = body_texture(args.body)
 
     if args.interactive:
