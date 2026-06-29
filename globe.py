@@ -296,29 +296,20 @@ def terminator(lat, lon, decl, sunlon):
 
 
 def _night(col, f: float):
-    """Darken + cool a colour toward night by day-fraction f (1 day, 0 night)."""
-    g = 0.28 + 0.72 * f  # brighter night floor than before
+    """Night side goes bright black & white: blend the colour toward a
+    gamma-lifted grey as it darkens (f: 1 day .. 0 night). Monochrome on the
+    dark hemisphere, and kept bright rather than a murky dim."""
+    ng = (_lum(col) / 255.0) ** 0.55 * 235.0  # gamma-lifted grey, stays bright
+    mix = 1.0 - f
     return (
-        max(0, min(255, int(col[0] * g))),
-        max(0, min(255, int(col[1] * g))),
-        max(0, min(255, int(col[2] * g + (1.0 - f) * 22))),
-    )
-
-
-def _night_sea(col, f: float):
-    """Night-side ocean fades to black & white: desaturate toward grey as it
-    darkens, so the dark hemisphere's sea reads monochrome, not blue."""
-    grey = _lum(col)
-    mix = 1.0 - f  # 0 day .. 1 deep night
-    d = 0.28 + 0.72 * f
-    return (
-        max(0, min(255, int((col[0] * (1 - mix) + grey * mix) * d))),
-        max(0, min(255, int((col[1] * (1 - mix) + grey * mix) * d))),
-        max(0, min(255, int((col[2] * (1 - mix) + grey * mix) * d))),
+        max(0, min(255, int(col[0] * (1 - mix) + ng * mix))),
+        max(0, min(255, int(col[1] * (1 - mix) + ng * mix))),
+        max(0, min(255, int(col[2] * (1 - mix) + ng * mix))),
     )
 
 
 CITY_RGB = (255, 214, 130)
+FOLLOW_STEP = 0.8  # degrees/frame when the globe turns under a sun-locked view
 
 
 def _city_light(r: int, c: int) -> bool:
@@ -363,9 +354,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
                     col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], palette)
                     if illum is not None:
                         f = float(illum[r, c])
-                        if is_ocean[r, c]:
-                            col = _night_sea(col, f)
-                        elif f < 0.45 and _city_light(r, c):
+                        if f < 0.45 and not is_ocean[r, c] and _city_light(r, c):
                             col = CITY_RGB
                         else:
                             col = _night(col, f)
@@ -448,9 +437,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
                     )
                     if illum_c is not None:
                         f = float(illum_c[r, c])
-                        if ocean_c[r, c]:
-                            col = _night_sea(col, f)
-                        elif f < 0.45 and _city_light(r, c):
+                        if f < 0.45 and not ocean_c[r, c] and _city_light(r, c):
                             col = CITY_RGB
                         else:
                             col = _night(col, f)
@@ -483,8 +470,16 @@ def _center(text, width, color):
 
 
 def build_frame(tex, args, status=None):
-    # Recompute the sub-solar point every frame so day/night tracks the real sun.
-    sun = subsolar(datetime.datetime.now(datetime.timezone.utc)) if args.sun else None
+    if getattr(args, "follow", False):
+        # Sun-locked view: the sub-solar point is pinned to the screen centre,
+        # so we always see the day side while the globe turns under it. Centre of
+        # the disc shows (lat, lon), so that's where the sun sits.
+        sun = (math.radians(args.lat), math.radians(args.lon))
+    elif args.sun:
+        # Recompute every frame so day/night tracks the real sun.
+        sun = subsolar(datetime.datetime.now(datetime.timezone.utc))
+    else:
+        sun = None
     if args.glyphs == "braille":
         body, width = render_braille(
             tex, args.size, args.lon, args.lat, args.color,
@@ -571,7 +566,7 @@ def interactive(tex, args):
         sys.exit("interactive mode needs a real terminal (stdin is not a tty)")
     old = termios.tcgetattr(fd)
     snap = {k: getattr(args, k) for k in (
-        "lon", "lat", "size", "glyphs", "palette", "color", "sun",
+        "lon", "lat", "size", "glyphs", "palette", "color", "sun", "follow",
         "saturation", "gamma", "no_stars", "no_ring", "no_labels")}
     modes = ["braille", "unicode", "ascii"]
     colors = ["truecolor", "256", "none"]
@@ -579,7 +574,7 @@ def interactive(tex, args):
     drag = None  # last (x, y) while dragging
     menu_open = False
     menu_i = 0
-    PARAMS = ["palette", "glyphs", "color", "day/night",
+    PARAMS = ["palette", "glyphs", "color", "day/night", "follow sun",
               "stars", "ring", "labels", "saturation", "brightness"]
 
     def cycle(seq, cur, d=1):
@@ -589,6 +584,7 @@ def interactive(tex, args):
         return {
             "palette": args.palette, "glyphs": args.glyphs, "color": args.color,
             "day/night": "on" if args.sun else "off",
+            "follow sun": "on" if args.follow else "off",
             "stars": "off" if args.no_stars else "on",
             "ring": "off" if args.no_ring else "on",
             "labels": "off" if args.no_labels else "on",
@@ -596,6 +592,7 @@ def interactive(tex, args):
         }[name]
 
     def mchange(name, d):
+        nonlocal autospin
         if name == "palette":
             args.palette = cycle(PALETTE_NAMES, args.palette, d)
         elif name == "glyphs":
@@ -604,6 +601,12 @@ def interactive(tex, args):
             args.color = cycle(colors, args.color, d)
         elif name == "day/night":  # real-time sun tracking; planet does not spin
             args.sun = not args.sun
+        elif name == "follow sun":  # sun-locked view, globe turns under it
+            args.follow = not args.follow
+            if args.follow:
+                decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
+                args.lat, args.lon = math.degrees(decl), math.degrees(sunlon)
+                args.sun, autospin = False, False
         elif name == "stars":
             args.no_stars = not args.no_stars
         elif name == "ring":
@@ -632,8 +635,9 @@ def interactive(tex, args):
             frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
-            # spin needs full fps; day/night creeps in real time, ~1/s is plenty
-            timeout = (1.0 / max(args.fps, 1.0)) if autospin else (1.0 if args.sun else None)
+            # spin/follow need full fps; day/night creeps in real time, ~1/s ok
+            timeout = ((1.0 / max(args.fps, 1.0)) if (autospin or args.follow)
+                       else (1.0 if args.sun else None))
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
@@ -692,6 +696,8 @@ def interactive(tex, args):
                         menu_open = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
+            elif args.follow:
+                args.lon = (args.lon + FOLLOW_STEP) % 360
     except KeyboardInterrupt:
         pass
     finally:
@@ -716,6 +722,8 @@ def main():
     p.add_argument("--lon", type=float, default=None, help="central longitude (spin)")
     p.add_argument("--lat", type=float, default=None, help="view latitude (+north); default seasonal tilt under --sun")
     p.add_argument("--sun", action="store_true", help="real-time day/night terminator (now, UTC)")
+    p.add_argument("--follow", action="store_true",
+                   help="sun-locked view: always show the day side, slowly rotate the globe")
     p.add_argument("--aspect", type=float, default=2.0, help="cell height:width ratio")
     p.add_argument("--ramp", default="", help="override glyph ramp dark->bright")
     p.add_argument("--color", choices=["auto", "256", "truecolor", "none"], default="auto")
@@ -733,12 +741,17 @@ def main():
 
     args.color = resolve_color(args.color)
     set_color(args.saturation, args.gamma)
-    # Real-time sun: light the hemisphere that actually faces the sun now, and
-    # tilt the globe to the current seasonal declination.
-    if args.sun:
-        decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
-        # Default view: put the day/night terminator across the centre (sun 90deg
-        # to the side) so the division is actually visible; tilt to the season.
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if args.follow:
+        # Sun-locked view starts looking straight at the current sub-solar point.
+        decl, sunlon = subsolar(now)
+        if args.lon is None:
+            args.lon = math.degrees(sunlon)
+        if args.lat is None:
+            args.lat = math.degrees(decl)
+    elif args.sun:
+        # Day/night view: terminator across the centre, seasonal tilt.
+        decl, sunlon = subsolar(now)
         if args.lon is None:
             args.lon = (math.degrees(sunlon) + 90.0 + 180.0) % 360.0 - 180.0
         if args.lat is None:
@@ -754,14 +767,15 @@ def main():
     if args.interactive:
         interactive(tex, args)
         return
-    if not args.spin:
+    if not (args.spin or args.follow):
         print(build_frame(tex, args))
         return
     delay = 1.0 / max(args.fps, 1.0)
+    step = FOLLOW_STEP if (args.follow and not args.spin) else args.step
     try:
         sys.stdout.write("\x1b[2J\x1b[?25l")
         while True:
-            args.lon = (args.lon + args.step) % 360
+            args.lon = (args.lon + step) % 360
             frame = build_frame(tex, args).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
