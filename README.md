@@ -51,8 +51,9 @@ make install            # venv in ~/.cache + pillow/numpy
 make run                # interactive
 ```
 
-Textures (~0.1–1 MB each) download once into `~/.cache/ascii-earth/` on first
-use. Pre-cache them all with `make assets`.
+The body textures are bundled with the package, so it works fully offline. (If
+a texture is ever missing it falls back to downloading into
+`~/.cache/ascii-earth/`.)
 
 ## Usage
 
@@ -120,13 +121,13 @@ mode needs a font with Braille glyphs (most monospace Nerd Fonts have them).
 
 ## Textures & attribution
 
-Textures are **not** bundled — they are fetched at runtime and cached locally.
+Textures are bundled in `ascii_earth/textures/` and keep their own licenses
+(see [NOTICE](NOTICE)):
 
 - **Earth** — NASA Blue Marble (*land + shallow topography*), public domain.
 - **All other bodies** — [Solar System Scope](https://www.solarsystemscope.com/textures)
-  equirectangular textures, licensed **CC-BY 4.0**, retrieved via Wikimedia
-  Commons. Attribution to Solar System Scope is required when redistributing
-  these textures.
+  equirectangular textures, licensed **CC-BY 4.0**. Attribution to Solar System
+  Scope is required when redistributing them.
 
 ## License
 

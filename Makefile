@@ -9,23 +9,19 @@ PIP  := $(VENV)/bin/pip
 install:
 	python3.12 -m venv $(VENV) && $(PIP) install -U pip && $(PIP) install -r requirements.txt
 
-# Interactive globe: hjkl/arrows spin, +/- zoom, space auto, q quit.
+# Interactive globe: drag/arrows rotate, wheel/+- zoom, ? for all keys, q quit.
 run:
-	$(PY) globe.py -i
+	$(PY) -m ascii_earth -i
 
 # Print the poster once (no interaction).
 poster:
-	$(PY) globe.py
+	$(PY) -m ascii_earth
 
 # Auto-spinning globe; Ctrl-C to stop.
 spin:
-	$(PY) globe.py --spin
-
-# Pre-cache every body's texture without rendering.
-assets:
-	$(PY) -c "import globe; [globe.body_texture(b) for b in globe.BODY_NAMES]; print('cached', len(globe.BODY_NAMES), 'bodies')"
+	$(PY) -m ascii_earth --spin
 
 clean:
-	rm -rf $(VENV) __pycache__ *.pyc
+	rm -rf $(VENV) ascii_earth/__pycache__ *.pyc
 
 all: install

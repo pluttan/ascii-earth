@@ -1,1 +1,1 @@
-globe
+ascii_earth

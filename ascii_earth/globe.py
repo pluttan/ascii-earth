@@ -92,9 +92,16 @@ def load_texture(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
 
 
+_BUNDLED = Path(__file__).resolve().parent / "textures"
+
+
 def body_texture(body: str) -> np.ndarray:
-    """Fetch (cached) and load the texture for a named body."""
+    """Load a body's texture. Prefer the bundled copy that ships with the
+    package (works offline); fall back to downloading into the cache."""
     info = BODIES[body]
+    bundled = _BUNDLED / info["file"]
+    if bundled.exists():
+        return load_texture(bundled)
     return load_texture(fetch_texture(info["url"], CACHE_DIR / info["file"]))
 
 

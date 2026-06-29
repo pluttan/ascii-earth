@@ -3,9 +3,8 @@ ascii-earth — texture attribution
 
 The code in this repository is licensed under the MIT License (see LICENSE).
 
-The celestial-body textures are NOT bundled with this software. They are
-downloaded at runtime into a local cache (~/.cache/ascii-earth/) and remain
-under their own licenses:
+The celestial-body textures are bundled with this software (in
+ascii_earth/textures/) and remain under their own licenses:
 
 - Earth: NASA Blue Marble ("land + shallow topography"). Public domain.
   https://visibleearth.nasa.gov/

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ascii-earth"
-version = "1.0.0"
+version = "1.1.0"
 description = "Render planets and the Sun as a live ASCII/Braille globe in your terminal"
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,7 +26,10 @@ Homepage = "https://github.com/pluttan/ascii-earth"
 Issues = "https://github.com/pluttan/ascii-earth/issues"
 
 [project.scripts]
-ascii-earth = "globe:main"
+ascii-earth = "ascii_earth.globe:main"
 
 [tool.setuptools]
-py-modules = ["globe"]
+packages = ["ascii_earth"]
+
+[tool.setuptools.package-data]
+ascii_earth = ["textures/*.jpg"]
