@@ -58,14 +58,16 @@ BODY_NAMES = list(BODIES)
 _EARTH_R = 6371.0
 
 
-def scaled_size(scale, body, ref, cols):
+def scaled_size(scale, body, ref):
     """Disc diameter for a body under a scaling mode. 'fit' returns None (use
-    auto-fit); 'sqrt'/'real' size it by real radius relative to Earth."""
+    auto-fit); 'sqrt'/'real' size it by real radius relative to Earth. No upper
+    cap — the viewport clips anything bigger, and capping made the Sun stick at
+    the ceiling so zoom couldn't shrink it."""
     if scale == "fit":
         return None
     ratio = BODIES[body].get("r", _EARTH_R) / _EARTH_R
     s = ref * (ratio ** 0.5) if scale == "sqrt" else ref * ratio
-    return int(max(5, min(s, 6 * cols)))
+    return int(max(5, s))
 
 # Descriptive UA: Wikimedia blocks generic/empty agents.
 _UA = "ascii-earth/1.0 (terminal globe renderer; +https://github.com/pluttan/ascii-earth)"
@@ -722,8 +724,7 @@ def interactive(tex, args):
             args.sun, autospin = False, False
 
     def apply_scale():
-        cols = shutil.get_terminal_size((100, 40))[0]
-        s = scaled_size(args.scale, args.body, args.scale_ref, cols)
+        s = scaled_size(args.scale, args.body, args.scale_ref)
         if s is None:  # fit
             args.size = auto_size(args.aspect)
             ri = BODIES[args.body].get("rings")
@@ -737,7 +738,7 @@ def interactive(tex, args):
         if args.scale == "fit":  # zoom this body directly
             args.size = (min(args.size + 4, 4 * cols) if d > 0 else max(20, args.size - 4))
         else:  # zoom the shared scale -> every body scales together
-            args.scale_ref = max(4.0, min(args.scale_ref * (1.12 if d > 0 else 1 / 1.12), 6 * cols))
+            args.scale_ref = max(2.0, min(args.scale_ref * (1.12 if d > 0 else 1 / 1.12), 2.0 * cols))
             apply_scale()
 
     def rotate(dlon=0.0, dlat=0.0):
@@ -942,8 +943,7 @@ def main():
     # all bodies shrink/grow together and keep their relative sizes).
     args.scale_ref = float(auto_size(args.aspect))
     if args.size <= 0:
-        cols = shutil.get_terminal_size((100, 40))[0]
-        s = scaled_size(args.scale, args.body, args.scale_ref, cols)
+        s = scaled_size(args.scale, args.body, args.scale_ref)
         if s is None:  # fit mode
             args.size = auto_size(args.aspect)
             if info.get("rings") and not args.no_rings:  # leave room for the rings
