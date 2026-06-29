@@ -305,6 +305,19 @@ def _night(col, f: float):
     )
 
 
+def _night_sea(col, f: float):
+    """Night-side ocean fades to black & white: desaturate toward grey as it
+    darkens, so the dark hemisphere's sea reads monochrome, not blue."""
+    grey = _lum(col)
+    mix = 1.0 - f  # 0 day .. 1 deep night
+    d = 0.28 + 0.72 * f
+    return (
+        max(0, min(255, int((col[0] * (1 - mix) + grey * mix) * d))),
+        max(0, min(255, int((col[1] * (1 - mix) + grey * mix) * d))),
+        max(0, min(255, int((col[2] * (1 - mix) + grey * mix) * d))),
+    )
+
+
 CITY_RGB = (255, 214, 130)
 
 
@@ -350,7 +363,9 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
                     col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], palette)
                     if illum is not None:
                         f = float(illum[r, c])
-                        if f < 0.45 and not is_ocean[r, c] and _city_light(r, c):
+                        if is_ocean[r, c]:
+                            col = _night_sea(col, f)
+                        elif f < 0.45 and _city_light(r, c):
                             col = CITY_RGB
                         else:
                             col = _night(col, f)
@@ -433,7 +448,9 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
                     )
                     if illum_c is not None:
                         f = float(illum_c[r, c])
-                        if f < 0.45 and not ocean_c[r, c] and _city_light(r, c):
+                        if ocean_c[r, c]:
+                            col = _night_sea(col, f)
+                        elif f < 0.45 and _city_light(r, c):
                             col = CITY_RGB
                         else:
                             col = _night(col, f)
@@ -562,7 +579,7 @@ def interactive(tex, args):
     drag = None  # last (x, y) while dragging
     menu_open = False
     menu_i = 0
-    PARAMS = ["palette", "glyphs", "color", "day/night", "follow sun",
+    PARAMS = ["palette", "glyphs", "color", "day/night",
               "stars", "ring", "labels", "saturation", "brightness"]
 
     def cycle(seq, cur, d=1):
@@ -572,7 +589,6 @@ def interactive(tex, args):
         return {
             "palette": args.palette, "glyphs": args.glyphs, "color": args.color,
             "day/night": "on" if args.sun else "off",
-            "follow sun": "on" if (args.sun and autospin) else "off",
             "stars": "off" if args.no_stars else "on",
             "ring": "off" if args.no_ring else "on",
             "labels": "off" if args.no_labels else "on",
@@ -580,18 +596,14 @@ def interactive(tex, args):
         }[name]
 
     def mchange(name, d):
-        nonlocal autospin
         if name == "palette":
             args.palette = cycle(PALETTE_NAMES, args.palette, d)
         elif name == "glyphs":
             args.glyphs = cycle(modes, args.glyphs, d)
         elif name == "color":
             args.color = cycle(colors, args.color, d)
-        elif name == "day/night":
+        elif name == "day/night":  # real-time sun tracking; planet does not spin
             args.sun = not args.sun
-        elif name == "follow sun":  # spin the globe in step with the lit side
-            on = not (args.sun and autospin)
-            args.sun, autospin = on, on
         elif name == "stars":
             args.no_stars = not args.no_stars
         elif name == "ring":
@@ -620,7 +632,8 @@ def interactive(tex, args):
             frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
-            timeout = (1.0 / max(args.fps, 1.0)) if (autospin or args.sun) else None
+            # spin needs full fps; day/night creeps in real time, ~1/s is plenty
+            timeout = (1.0 / max(args.fps, 1.0)) if autospin else (1.0 if args.sun else None)
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
