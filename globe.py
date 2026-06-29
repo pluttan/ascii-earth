@@ -251,6 +251,23 @@ def _pal_neon(rgb, ocean, bright):
     return _lerp((0, 40, 45), (40, 255, 210), v)
 
 
+# Catppuccin Mocha accents mapped onto the globe.
+_CAT_SKY, _CAT_TEAL, _CAT_GREEN = (137, 220, 235), (148, 226, 213), (166, 227, 161)
+_CAT_YELLOW, _CAT_PEACH, _CAT_TEXT = (249, 226, 175), (250, 179, 135), (205, 214, 244)
+
+
+def _pal_catppuccin(rgb, ocean, bright):
+    if ocean:
+        return _lerp((54, 70, 140), _CAT_SKY, _sea_t(bright))  # blue -> sky by depth
+    r, g, b = float(rgb[0]), float(rgb[1]), float(rgb[2])
+    lum = _lum(rgb)
+    if lum > 170 and (max(r, g, b) - min(r, g, b)) < 45:  # bright & neutral = ice
+        return _CAT_TEXT
+    if g + 8 >= r:                                  # vegetation -> teal..green
+        return _lerp(_CAT_TEAL, _CAT_GREEN, min(1.0, g / 190.0))
+    return _lerp(_CAT_PEACH, _CAT_YELLOW, min(1.0, lum / 200.0))  # arid -> peach..yellow
+
+
 # Map-style schemes plus a pile of monochrome/false-colour looks.
 PALETTES = {
     "natural": _pal_natural,
@@ -262,6 +279,7 @@ PALETTES = {
     "mono": lambda r, o, b: _mono(r, o, b, (10, 10, 12), (240, 242, 245)),
     "inferno": _pal_inferno,
     "neon": _pal_neon,
+    "catppuccin": _pal_catppuccin,
 }
 PALETTE_NAMES = list(PALETTES)
 
@@ -269,8 +287,12 @@ PALETTE_NAMES = list(PALETTES)
 def cell_color(rgb, is_ocean, bright, palette):
     # Flat shading on purpose: a radial gradient drew a bright "circle" on the
     # open sea. Depth/relief come from the texture itself. _grade applies the
-    # sat/brightness controls uniformly (ocean included).
-    return _grade(PALETTES.get(palette, _pal_natural)(rgb, is_ocean, bright))
+    # sat/brightness controls uniformly (ocean included) — except branded
+    # palettes (catppuccin), whose pastel tones must stay exact.
+    base = PALETTES.get(palette, _pal_natural)(rgb, is_ocean, bright)
+    if palette == "catppuccin":
+        return (int(base[0]), int(base[1]), int(base[2]))
+    return _grade(base)
 
 
 # ==========================
@@ -295,28 +317,18 @@ def terminator(lat, lon, decl, sunlon):
     return np.clip((cz + 0.12) / 0.24, 0.0, 1.0)
 
 
-def _night(col, f: float):
-    """Night side goes bright black & white: blend the colour toward a
-    gamma-lifted grey as it darkens (f: 1 day .. 0 night). Monochrome on the
-    dark hemisphere, and kept bright rather than a murky dim."""
-    ng = (_lum(col) / 255.0) ** 0.55 * 235.0  # gamma-lifted grey, stays bright
+def _night(col, f: float, ocean: bool = False):
+    """Night side goes black & white (gamma-lifted grey, f: 1 day .. 0 night).
+    Ocean is kept darker than land so coastlines still read in the dark."""
+    ng = (_lum(col) / 255.0) ** 0.55 * 235.0
+    if ocean:
+        ng *= 0.4  # night sea darker than night land
     mix = 1.0 - f
     return (
         max(0, min(255, int(col[0] * (1 - mix) + ng * mix))),
         max(0, min(255, int(col[1] * (1 - mix) + ng * mix))),
         max(0, min(255, int(col[2] * (1 - mix) + ng * mix))),
     )
-
-
-CITY_RGB = (255, 214, 130)
-FOLLOW_STEP = 0.8  # degrees/frame when the globe turns under a sun-locked view
-
-
-def _city_light(r: int, c: int) -> bool:
-    """Deterministic sparse 'city lights' on the night side. Procedural (no
-    real population data in this texture), just sprinkled warm dots on dark land."""
-    h = ((r * 92837111) ^ (c * 689287499)) & 0xFFFFFFFF
-    return (h % 100) < 7
 
 
 # ==========================
@@ -353,11 +365,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
                         glyph = "."
                     col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], palette)
                     if illum is not None:
-                        f = float(illum[r, c])
-                        if f < 0.45 and not is_ocean[r, c] and _city_light(r, c):
-                            col = CITY_RGB
-                        else:
-                            col = _night(col, f)
+                        col = _night(col, float(illum[r, c]), bool(is_ocean[r, c]))
             else:
                 star = _star_at(r, c, stars)
                 if star is None:
@@ -436,11 +444,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
                         rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), palette,
                     )
                     if illum_c is not None:
-                        f = float(illum_c[r, c])
-                        if f < 0.45 and not ocean_c[r, c] and _city_light(r, c):
-                            col = CITY_RGB
-                        else:
-                            col = _night(col, f)
+                        col = _night(col, float(illum_c[r, c]), bool(ocean_c[r, c]))
                 glyph = chr(0x2800 + bits)
             else:
                 star = _star_at(r, c, stars) if not inside[cy, cx] else None
@@ -470,11 +474,14 @@ def _center(text, width, color):
 
 
 def build_frame(tex, args, status=None):
+    lon0, lat0 = args.lon, args.lat
     if getattr(args, "follow", False):
-        # Sun-locked view: the sub-solar point is pinned to the screen centre,
-        # so we always see the day side while the globe turns under it. Centre of
-        # the disc shows (lat, lon), so that's where the sun sits.
-        sun = (math.radians(args.lat), math.radians(args.lon))
+        # Sun-locked view: centre the disc on the real sub-solar point. Earth
+        # turns under it at the real rate (sub-solar longitude moves 15deg/h ->
+        # exactly one turn per 24h), so we always see the day side.
+        decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
+        lat0, lon0 = math.degrees(decl), math.degrees(sunlon)
+        sun = (decl, sunlon)
     elif args.sun:
         # Recompute every frame so day/night tracks the real sun.
         sun = subsolar(datetime.datetime.now(datetime.timezone.utc))
@@ -482,13 +489,13 @@ def build_frame(tex, args, status=None):
         sun = None
     if args.glyphs == "braille":
         body, width = render_braille(
-            tex, args.size, args.lon, args.lat, args.color,
+            tex, args.size, lon0, lat0, args.color,
             0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
         )
     else:
         ramp = args.ramp or (ASCII_RAMP if args.glyphs == "ascii" else UNICODE_RAMP)
         body, width = render_ramp(
-            tex, args.size, args.lon, args.lat, ramp, args.color,
+            tex, args.size, lon0, lat0, ramp, args.color,
             0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
         )
     lines = []
@@ -635,9 +642,9 @@ def interactive(tex, args):
             frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
-            # spin/follow need full fps; day/night creeps in real time, ~1/s ok
-            timeout = ((1.0 / max(args.fps, 1.0)) if (autospin or args.follow)
-                       else (1.0 if args.sun else None))
+            # spin needs full fps; sun/follow move in real time, redraw ~1/s
+            timeout = ((1.0 / max(args.fps, 1.0)) if autospin
+                       else (1.0 if (args.sun or args.follow) else None))
             if select.select([fd], [], [], timeout)[0]:
                 buf = os.read(fd, 256).decode(errors="ignore")
                 for ev in _parse_input(buf):
@@ -696,8 +703,6 @@ def interactive(tex, args):
                         menu_open = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
-            elif args.follow:
-                args.lon = (args.lon + FOLLOW_STEP) % 360
     except KeyboardInterrupt:
         pass
     finally:
@@ -770,12 +775,14 @@ def main():
     if not (args.spin or args.follow):
         print(build_frame(tex, args))
         return
-    delay = 1.0 / max(args.fps, 1.0)
-    step = FOLLOW_STEP if (args.follow and not args.spin) else args.step
+    # follow turns at the real 24h rate (driven by the clock in build_frame), so
+    # it only needs an occasional redraw; spin animates at fps.
+    delay = 1.0 if (args.follow and not args.spin) else 1.0 / max(args.fps, 1.0)
     try:
         sys.stdout.write("\x1b[2J\x1b[?25l")
         while True:
-            args.lon = (args.lon + step) % 360
+            if args.spin:
+                args.lon = (args.lon + args.step) % 360
             frame = build_frame(tex, args).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
