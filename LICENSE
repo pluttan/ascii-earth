@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-The planet/celestial-body textures are NOT included in this repository; they
-are downloaded at runtime into a local cache and remain under their own
-licenses:
-
-- Earth: NASA Blue Marble ("land + shallow topography"), public domain.
-- All other bodies: Solar System Scope textures (https://www.solarsystemscope.com/textures),
-  licensed CC-BY 4.0, retrieved via Wikimedia Commons. Attribution required;
-  see README.

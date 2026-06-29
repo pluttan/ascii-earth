@@ -1,0 +1,21 @@
+ascii-earth — texture attribution
+=================================
+
+The code in this repository is licensed under the MIT License (see LICENSE).
+
+The celestial-body textures are NOT bundled with this software. They are
+downloaded at runtime into a local cache (~/.cache/ascii-earth/) and remain
+under their own licenses:
+
+- Earth: NASA Blue Marble ("land + shallow topography"). Public domain.
+  https://visibleearth.nasa.gov/
+
+- All other bodies (Sun, Mercury, Venus, Moon, Mars, Jupiter, Saturn, Uranus,
+  Neptune, Ceres): textures by Solar System Scope, licensed under
+  Creative Commons Attribution 4.0 International (CC-BY 4.0), retrieved via
+  Wikimedia Commons.
+  https://www.solarsystemscope.com/textures
+  https://creativecommons.org/licenses/by/4.0/
+
+  Attribution to Solar System Scope is required when redistributing these
+  textures.
