@@ -12,6 +12,7 @@ or the mouse.
 """
 
 import argparse
+import datetime
 import math
 import os
 import shutil
@@ -146,7 +147,9 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     z = np.sqrt(np.clip(1.0 - r2, 0.0, None))
 
     Y, Z = -NY, z
-    t = math.radians(lat0)
+    # Negate so +lat0 looks NORTH (intuitive). Without this the tilt was
+    # inverted: positive lat0 pointed south, making drag/keys feel upside down.
+    t = math.radians(-lat0)
     Y2 = Y * math.cos(t) - Z * math.sin(t)
     Z2 = Y * math.sin(t) + Z * math.cos(t)
     lat = np.arcsin(np.clip(Y2, -1.0, 1.0))
@@ -165,7 +168,7 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     # No z term here: a radial brightness gradient drew a bright "circle" on the
     # open sea. Depth/relief come from the texture luminance alone.
     bright = np.clip(np.where(is_ocean, ocean_b, land_b), 0.0, 1.0)
-    return inside, z, bright, is_ocean, rgb
+    return inside, z, bright, is_ocean, rgb, lat, lon
 
 
 # Saturation + a gamma LUT (<1 lifts shadows so dark ocean reads bright).
@@ -208,16 +211,49 @@ def cell_color(rgb, is_ocean, bright, tint):
 
 
 # ==========================
+# ===  Day / night       ===
+# ==========================
+
+
+def subsolar(dt: datetime.datetime):
+    """Approximate sub-solar point (lat, lon in radians) for a UTC datetime.
+    Declination from day-of-year; longitude from UTC hour (no equation-of-time,
+    so it's good to ~a couple degrees — fine for a day/night terminator)."""
+    n = dt.timetuple().tm_yday
+    decl = math.radians(-23.44) * math.cos(math.radians(360.0 / 365.0 * (n + 10)))
+    utc_h = dt.hour + dt.minute / 60.0 + dt.second / 3600.0
+    sunlon = math.radians(((-15.0 * (utc_h - 12.0) + 180.0) % 360.0) - 180.0)
+    return decl, sunlon
+
+
+def terminator(lat, lon, decl, sunlon):
+    """0 = night, 1 = day, soft band across the terminator."""
+    cz = np.sin(lat) * math.sin(decl) + np.cos(lat) * math.cos(decl) * np.cos(lon - sunlon)
+    return np.clip((cz + 0.12) / 0.24, 0.0, 1.0)
+
+
+def _night(col, f: float):
+    """Darken + cool a colour toward night by day-fraction f (1 day, 0 night)."""
+    g = 0.15 + 0.85 * f
+    return (
+        max(0, min(255, int(col[0] * g))),
+        max(0, min(255, int(col[1] * g))),
+        max(0, min(255, int(col[2] * g + (1.0 - f) * 16))),
+    )
+
+
+# ==========================
 # ===  Renderers         ===
 # ==========================
 
 
-def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint):
+def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint, sun):
     rx = size / 2.0
     ry = rx / aspect
     width = int(round(2 * rx)) + 2
     height = int(round(2 * ry)) + 2
-    inside, z, bright, is_ocean, rgb = _project(width, height, rx, ry, lon0, lat0, tex)
+    inside, z, bright, is_ocean, rgb, lat, lon = _project(width, height, rx, ry, lon0, lat0, tex)
+    illum = terminator(lat, lon, *sun) if sun else None
     nramp = len(ramp)
     idx = np.clip((bright * (nramp - 1)).round().astype(int), 0, nramp - 1)
     # limb ring: inside but near the rim
@@ -239,6 +275,8 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint):
                     if glyph == " ":
                         glyph = "."
                     col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], tint)
+                    if illum is not None:
+                        col = _night(col, float(illum[r, c]))
             else:
                 star = _star_at(r, c, stars)
                 if star is None:
@@ -266,14 +304,14 @@ _BAYER = np.array(
 ) / 16.0
 
 
-def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
+def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint, sun):
     """Sub-pixel render: each cell is a 2x4 Braille dot matrix. Dots fill nearly
     solid (so the globe reads as a filled map); colour carries land/sea/ice."""
     width = int(round(size)) + 2
     height = int(round(size / aspect)) + 2
     sw, sh = width * 2, height * 4
     rx, ry = sw / 2.0, sh / 2.0
-    inside, z, bright, is_ocean, rgb = _project(sw, sh, rx, ry, lon0, lat0, tex)
+    inside, z, bright, is_ocean, rgb, lat, lon = _project(sw, sh, rx, ry, lon0, lat0, tex)
 
     yy, xx = np.mgrid[0:sh, 0:sw]
     rr = ((xx - (sw - 1) / 2) / rx) ** 2 + ((yy - (sh - 1) / 2) / ry) ** 2
@@ -290,6 +328,11 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
     rgb_c = (rgb * inside[..., None]).reshape(height, 4, width, 2, 3).sum((1, 3)) / wsum[..., None]
     bright_c = (bright * inside).reshape(height, 4, width, 2).sum((1, 3)) / wsum
     ocean_c = (rgb_c[..., 2] > rgb_c[..., 0]) & (rgb_c[..., 2] > rgb_c[..., 1])
+    if sun:
+        illum = terminator(lat, lon, *sun)
+        illum_c = (illum * inside).reshape(height, 4, width, 2).sum((1, 3)) / wsum
+    else:
+        illum_c = None
 
     truecolor = color == "truecolor"
     mono = color == "none"
@@ -311,6 +354,8 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
                     col = cell_color(
                         rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), tint,
                     )
+                    if illum_c is not None:
+                        col = _night(col, float(illum_c[r, c]))
                 glyph = chr(0x2800 + bits)
             else:
                 star = _star_at(r, c, stars) if not inside[cy, cx] else None
@@ -340,16 +385,17 @@ def _center(text, width, color):
 
 
 def build_frame(tex, args, status=None):
+    sun = getattr(args, "sun_pos", None)
     if args.glyphs == "braille":
         body, width = render_braille(
             tex, args.size, args.lon, args.lat, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint, sun,
         )
     else:
         ramp = args.ramp or (ASCII_RAMP if args.glyphs == "ascii" else UNICODE_RAMP)
         body, width = render_ramp(
             tex, args.size, args.lon, args.lat, ramp, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint,
+            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.tint, sun,
         )
     lines = []
     if not args.no_labels:
@@ -500,8 +546,9 @@ def main():
     p.add_argument("--saturation", type=float, default=2.1, help="colour saturation (1 = none)")
     p.add_argument("--gamma", type=float, default=0.55, help="brightness gamma (<1 = brighter)")
     p.add_argument("--size", type=int, default=0, help="disc diameter in columns (0 = fit terminal)")
-    p.add_argument("--lon", type=float, default=-30.0, help="central longitude (spin)")
-    p.add_argument("--lat", type=float, default=18.0, help="axial tilt / view latitude")
+    p.add_argument("--lon", type=float, default=None, help="central longitude (spin)")
+    p.add_argument("--lat", type=float, default=None, help="view latitude (+north); default seasonal tilt under --sun")
+    p.add_argument("--sun", action="store_true", help="real-time day/night terminator (now, UTC)")
     p.add_argument("--aspect", type=float, default=2.0, help="cell height:width ratio")
     p.add_argument("--ramp", default="", help="override glyph ramp dark->bright")
     p.add_argument("--color", choices=["auto", "256", "truecolor", "none"], default="auto")
@@ -519,6 +566,23 @@ def main():
 
     args.color = resolve_color(args.color)
     set_color(args.saturation, args.gamma)
+    # Real-time sun: light the hemisphere that actually faces the sun now, and
+    # tilt the globe to the current seasonal declination.
+    if args.sun:
+        decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
+        args.sun_pos = (decl, sunlon)
+        # Default view: put the day/night terminator across the centre (sun 90deg
+        # to the side) so the division is actually visible; tilt to the season.
+        if args.lon is None:
+            args.lon = (math.degrees(sunlon) + 90.0 + 180.0) % 360.0 - 180.0
+        if args.lat is None:
+            args.lat = math.degrees(decl)
+    else:
+        args.sun_pos = None
+    if args.lon is None:
+        args.lon = -30.0
+    if args.lat is None:
+        args.lat = 18.0
     if args.size <= 0:
         args.size = auto_size(args.aspect)
     tex = load_texture(fetch_texture())
