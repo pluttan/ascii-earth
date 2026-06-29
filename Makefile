@@ -9,11 +9,15 @@ PIP  := $(VENV)/bin/pip
 install:
 	python3.12 -m venv $(VENV) && $(PIP) install -U pip && $(PIP) install -r requirements.txt
 
-# Print the poster once.
+# Interactive globe: hjkl/arrows spin, +/- zoom, space auto, q quit.
 run:
+	$(PY) globe.py -i
+
+# Print the poster once (no interaction).
+poster:
 	$(PY) globe.py
 
-# Spinning globe; Ctrl-C to stop.
+# Auto-spinning globe; Ctrl-C to stop.
 spin:
 	$(PY) globe.py --spin
 
