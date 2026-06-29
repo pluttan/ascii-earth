@@ -331,9 +331,6 @@ def _night(col, f: float, ocean: bool = False):
     )
 
 
-FOLLOW_STEP = 0.3  # degrees/frame: slow but visible spin in sun-locked follow
-
-
 # ==========================
 # ===  Renderers         ===
 # ==========================
@@ -479,10 +476,12 @@ def _center(text, width, color):
 def build_frame(tex, args, status=None):
     lon0, lat0 = args.lon, args.lat
     if getattr(args, "follow", False):
-        # Sun-locked view: the sun is pinned to the screen centre, so the lit
-        # (day) side always faces us — we never see night. The globe itself
-        # spins (advanced in the loop), continents pass through noon.
-        sun = (math.radians(lat0), math.radians(lon0))
+        # Sun-locked, real time: centre on the actual sub-solar point. Earth
+        # turns under it at the real rate -> one turn per 24h. Always day side,
+        # no manual control; the clock drives it.
+        decl, sunlon = subsolar(datetime.datetime.now(datetime.timezone.utc))
+        lat0, lon0 = math.degrees(decl), math.degrees(sunlon)
+        sun = (decl, sunlon)
     elif args.sun:
         # Recompute every frame so day/night tracks the real sun.
         sun = subsolar(datetime.datetime.now(datetime.timezone.utc))
@@ -508,7 +507,10 @@ def build_frame(tex, args, status=None):
     if status is not None:
         for sline in status.split("\n"):
             lines.append(_center(sline, width, args.color))
-    return "\n".join(lines)
+    # Centre the whole frame horizontally in the terminal.
+    cols = shutil.get_terminal_size((100, 40))[0]
+    lead = " " * max(0, (cols - width) // 2)
+    return "\n".join(lead + ln for ln in lines)
 
 
 # ==========================
@@ -643,10 +645,10 @@ def interactive(tex, args):
                 sys.stdout.flush()
             if help_open:
                 timeout = None
-            elif autospin or args.follow:
+            elif autospin:
                 timeout = 1.0 / max(args.fps, 1.0)
-            elif args.sun:
-                timeout = 1.0
+            elif args.sun or args.follow:
+                timeout = 1.0  # real-time creep (24h/turn); redraw ~1/s
             else:
                 timeout = None
             if select.select([fd], [], [], timeout)[0]:
@@ -726,8 +728,6 @@ def interactive(tex, args):
                         autospin = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
-            elif args.follow:
-                args.lon = (args.lon + FOLLOW_STEP) % 360
     except KeyboardInterrupt:
         pass
     finally:
@@ -800,14 +800,13 @@ def main():
     if not (args.spin or args.follow):
         print(build_frame(tex, args))
         return
-    delay = 1.0 / max(args.fps, 1.0)
+    # follow advances via the real clock (in build_frame); only spin steps lon.
+    delay = 1.0 if (args.follow and not args.spin) else 1.0 / max(args.fps, 1.0)
     try:
         sys.stdout.write("\x1b[2J\x1b[?25l")
         while True:
             if args.spin:
                 args.lon = (args.lon + args.step) % 360
-            elif args.follow:
-                args.lon = (args.lon + FOLLOW_STEP) % 360
             frame = build_frame(tex, args).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
