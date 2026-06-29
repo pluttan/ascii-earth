@@ -21,9 +21,9 @@ poster:
 spin:
 	$(PY) globe.py --spin
 
-# Pre-cache the Earth texture without rendering.
+# Pre-cache every body's texture without rendering.
 assets:
-	$(PY) -c "from globe import fetch_texture; print(fetch_texture())"
+	$(PY) -c "import globe; [globe.body_texture(b) for b in globe.BODY_NAMES]; print('cached', len(globe.BODY_NAMES), 'bodies')"
 
 clean:
 	rm -rf $(VENV) __pycache__ *.pyc

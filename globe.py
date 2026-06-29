@@ -28,31 +28,62 @@ from PIL import Image
 # ===  Texture handling  ===
 # ==========================
 
-TEXTURE_URL = (
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "ascii-earth"
+
+# Earth = NASA Blue Marble (public domain). All other bodies = Solar System
+# Scope equirectangular textures (CC-BY 4.0), pulled via Wikimedia's stable
+# Special:FilePath redirect. See README for attribution.
+_NASA_EARTH = (
     "https://eoimages.gsfc.nasa.gov/images/imagerecords/"
     "57000/57752/land_shallow_topo_2048.jpg"
 )
-CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "ascii-earth"
-CACHE_FILE = CACHE_DIR / "land_shallow_topo_2048.jpg"
+_SSS = "https://commons.wikimedia.org/wiki/Special:FilePath/Solarsystemscope_texture_2k_"
+
+BODIES = {
+    "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True,
+                "top": "THAT'S NO EARTH!", "bottom": "IT'S A SPACE STATION."},
+    "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False},
+    "mercury": {"url": _SSS + "mercury.jpg", "file": "mercury.jpg", "ocean": False},
+    "venus":   {"url": _SSS + "venus_atmosphere.jpg", "file": "venus.jpg", "ocean": False},
+    "moon":    {"url": _SSS + "moon.jpg", "file": "moon.jpg", "ocean": False},
+    "mars":    {"url": _SSS + "mars.jpg", "file": "mars.jpg", "ocean": False},
+    "jupiter": {"url": _SSS + "jupiter.jpg", "file": "jupiter.jpg", "ocean": False},
+    "saturn":  {"url": _SSS + "saturn.jpg", "file": "saturn.jpg", "ocean": False,
+                "rings": {"inner": 1.24, "outer": 2.30, "color": (220, 200, 165)}},
+    "uranus":  {"url": _SSS + "uranus.jpg", "file": "uranus.jpg", "ocean": False,
+                "rings": {"inner": 1.55, "outer": 1.95, "color": (120, 140, 150)}},
+    "neptune": {"url": _SSS + "neptune.jpg", "file": "neptune.jpg", "ocean": False},
+    "ceres":   {"url": _SSS + "ceres_fictional.jpg", "file": "ceres.jpg", "ocean": False},
+}
+BODY_NAMES = list(BODIES)
+
+# Descriptive UA: Wikimedia blocks generic/empty agents.
+_UA = "ascii-earth/1.0 (terminal globe renderer; +https://github.com/pluttan/ascii-earth)"
 
 
-def fetch_texture(url: str = TEXTURE_URL, dest: Path = CACHE_FILE) -> Path:
+def fetch_texture(url: str, dest: Path) -> Path:
     if dest.exists() and dest.stat().st_size > 0:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "ascii-earth/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as f:
+        with urllib.request.urlopen(req, timeout=45) as r, open(dest, "wb") as f:
             f.write(r.read())
     except Exception as exc:  # noqa: BLE001 - friendly message, not a trace
         if dest.exists():
             dest.unlink(missing_ok=True)
-        sys.exit(f"could not fetch Earth texture ({exc}).\ndownload it to {dest} from:\n  {url}")
+        sys.exit(f"could not fetch texture ({exc}).\ndownload it to {dest} from:\n  {url}")
     return dest
 
 
 def load_texture(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+
+
+def body_texture(body: str) -> np.ndarray:
+    """Fetch (cached) and load the texture for a named body."""
+    info = BODIES[body]
+    return load_texture(fetch_texture(info["url"], CACHE_DIR / info["file"]))
 
 
 # ==========================
@@ -137,8 +168,10 @@ def _star_at(row: int, col: int, density: float):
 # ==========================
 
 
-def _project(width, height, rx, ry, lon0, lat0, tex):
-    """Return (inside, z, brightness, is_ocean, rgb) on a width x height grid."""
+def _project(width, height, rx, ry, lon0, lat0, tex, ocean=True):
+    """Return (inside, z, brightness, is_ocean, rgb) on a width x height grid.
+    ocean=False (non-Earth bodies) disables sea detection: every cell is land
+    and keeps the texture's own colour."""
     th, tw = tex.shape[:2]
     cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
     NX, NY = np.meshgrid((np.arange(width) - cx) / rx, (np.arange(height) - cy) / ry)
@@ -162,7 +195,7 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     ].astype(np.float32)
     R, G, B = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     lum = 0.2126 * R + 0.7152 * G + 0.0722 * B
-    is_ocean = (B > R) & (B > G)
+    is_ocean = ((B > R) & (B > G)) if ocean else np.zeros_like(R, dtype=bool)
     ocean_b = 0.24 + 0.30 * np.clip(lum / 80.0, 0.0, 1.0)
     land_b = 0.50 + 0.50 * np.clip((lum - 55.0) / 190.0, 0.0, 1.0)
     # No z term here: a radial brightness gradient drew a bright "circle" on the
@@ -336,12 +369,11 @@ def _night(col, f: float, ocean: bool = False):
 # ==========================
 
 
-def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette, sun):
-    rx = size / 2.0
-    ry = rx / aspect
-    width = int(round(2 * rx)) + 2
-    height = int(round(2 * ry)) + 2
-    inside, z, bright, is_ocean, rgb, lat, lon = _project(width, height, rx, ry, lon0, lat0, tex)
+def render_ramp(tex, vw, vh, rx, ry, lon0, lat0, ramp, color, stars, ring, palette, sun, ocean=True, rings=None):
+    """Glyph-ramp render into a vw x vh viewport; planet centred, clipped at the
+    edges, starfield everywhere outside the disc."""
+    width, height = vw, vh
+    inside, z, bright, is_ocean, rgb, lat, lon = _project(width, height, rx, ry, lon0, lat0, tex, ocean)
     illum = terminator(lat, lon, *sun) if sun else None
     nramp = len(ramp)
     idx = np.clip((bright * (nramp - 1)).round().astype(int), 0, nramp - 1)
@@ -349,6 +381,9 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
     yy, xx = np.mgrid[0:height, 0:width]
     rr = ((xx - (width - 1) / 2) / rx) ** 2 + ((yy - (height - 1) / 2) / ry) ** 2
     ring_band = inside & (rr >= 0.975 * 0.975)
+    ring_m, ring_c = (_ring_overlay(width, height, rx, ry, lat0, rings)
+                      if rings else (None, None))
+    ring_glyph = ramp[int(0.72 * (nramp - 1))]
 
     truecolor = color == "truecolor"
     mono = color == "none"
@@ -356,7 +391,11 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
     for r in range(height):
         line, last = [], None
         for c in range(width):
-            if inside[r, c]:
+            if ring_m is not None and ring_m[r, c]:
+                rc = ring_c[r, c]
+                glyph = ring_glyph
+                col = (min(255, int(rc[0])), min(255, int(rc[1])), min(255, int(rc[2])))
+            elif inside[r, c]:
                 if ring and ring_band[r, c]:
                     glyph, col = "·", RING_RGB
                 else:
@@ -382,7 +421,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
         if not mono:
             line.append("\x1b[0m")
         out.append("".join(line))
-    return out, width
+    return out
 
 
 # Braille dot bit layout (col, row) -> bit value.
@@ -393,14 +432,44 @@ _BAYER = np.array(
 ) / 16.0
 
 
-def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, sun):
-    """Sub-pixel render: each cell is a 2x4 Braille dot matrix. Dots fill nearly
-    solid (so the globe reads as a filled map); colour carries land/sea/ice."""
-    width = int(round(size)) + 2
-    height = int(round(size / aspect)) + 2
+def _ring_overlay(width, height, rx, ry, lat0, rings):
+    """(mask, colour) per cell for a planet's rings. Rings sit in the equatorial
+    plane; tilt lat0 sets how open the ellipse is. Front arc draws over the disc,
+    back arc is hidden behind the sphere (proper depth occlusion)."""
+    t = math.radians(-lat0)
+    s = math.sin(t)
+    mask = np.zeros((height, width), dtype=bool)
+    color = np.zeros((height, width, 3), dtype=np.float32)
+    if abs(s) < 0.05:
+        return mask, color  # edge-on: rings invisible
+    cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+    NX, NY = np.meshgrid((np.arange(width) - cx) / rx, (np.arange(height) - cy) / ry)
+    rho = np.sqrt(NX ** 2 + (NY / s) ** 2)              # radius in the ring plane
+    inner, outer = rings["inner"], rings["outer"]
+    band = (rho >= inner) & (rho <= outer)
+    depth = -NY / math.tan(t)                            # +toward camera
+    disc = NX ** 2 + NY ** 2
+    zsph = np.sqrt(np.clip(1.0 - disc, 0.0, None))
+    mask = band & ((disc > 1.0) | (depth > zsph))        # outside disc, or in front
+    base = np.array(rings["color"], dtype=np.float32)
+    span = max(1e-6, outer - inner)
+    rn = (rho - inner) / span                            # 0..1 across the ring
+    bn = 0.40 + 0.60 * (0.5 + 0.5 * np.cos(rho * 17.0))  # sharp radial bands
+    bn *= 0.7 + 0.3 * rn                                 # outer ring a touch brighter
+    gap = (rn > 0.58) & (rn < 0.66)                      # Cassini-ish division
+    shade = np.where(gap, 0.18, bn)
+    color = base[None, None, :] * shade[..., None]
+    return mask, color
+
+
+def render_braille(tex, vw, vh, rx_c, ry_c, lon0, lat0, color, stars, ring, palette, sun, ocean=True, rings=None):
+    """Sub-pixel render into a vw x vh viewport. The planet (radius rx_c, ry_c
+    cells) is centred; anything past the viewport edge is simply clipped, and the
+    whole field outside the disc is starfield."""
+    width, height = vw, vh
     sw, sh = width * 2, height * 4
-    rx, ry = sw / 2.0, sh / 2.0
-    inside, z, bright, is_ocean, rgb, lat, lon = _project(sw, sh, rx, ry, lon0, lat0, tex)
+    rx, ry = rx_c * 2.0, ry_c * 4.0  # planet radius in sub-pixels
+    inside, z, bright, is_ocean, rgb, lat, lon = _project(sw, sh, rx, ry, lon0, lat0, tex, ocean)
 
     yy, xx = np.mgrid[0:sh, 0:sw]
     rr = ((xx - (sw - 1) / 2) / rx) ** 2 + ((yy - (sh - 1) / 2) / ry) ** 2
@@ -423,6 +492,9 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
     else:
         illum_c = None
 
+    ring_m, ring_c = (_ring_overlay(width, height, rx_c, ry_c, lat0, rings)
+                      if rings else (None, None))
+
     truecolor = color == "truecolor"
     mono = color == "none"
     out = []
@@ -436,7 +508,11 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
                     if dot[sy, sx] or (ring and ring_band[sy, sx]):
                         bits |= _BRAILLE_BITS[dy][dx]
             cy, cx = r * 4 + 2, c * 2  # cell-centre sample for colour/region
-            if bits:
+            if ring_m is not None and ring_m[r, c]:
+                rc = ring_c[r, c]
+                col = (min(255, int(rc[0])), min(255, int(rc[1])), min(255, int(rc[2])))
+                glyph = "⣿"  # solid braille block = ring band
+            elif bits:
                 if ring and ring_band[cy, cx] and not inside[cy, cx]:
                     col = RING_RGB
                 else:
@@ -462,7 +538,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
         if not mono:
             line.append("\x1b[0m")
         out.append("".join(line))
-    return out, width
+    return out
 
 
 def _center(text, width, color):
@@ -487,30 +563,38 @@ def build_frame(tex, args, status=None):
         sun = subsolar(datetime.datetime.now(datetime.timezone.utc))
     else:
         sun = None
+    binfo = BODIES.get(getattr(args, "body", "earth"), {})
+    ocean = binfo.get("ocean", True)
+    rings = binfo.get("rings")
+
+    # Viewport = the whole terminal. Captions glue to the top and bottom rows,
+    # status (interactive) to the very last row; the disc fills the middle. The
+    # planet is drawn at its own size and clipped at the edges if it's bigger,
+    # and the starfield fills the full viewport width.
+    cols, rows = shutil.get_terminal_size((100, 40))
+    labels = not args.no_labels
+    n_status = len(status.split("\n")) if status is not None else 0
+    disc_h = max(1, rows - (2 if labels else 0) - n_status)
+    rx_c = args.size / 2.0
+    ry_c = args.size / (2.0 * args.aspect)
+    stars = 0.0 if args.no_stars else args.stars
     if args.glyphs == "braille":
-        body, width = render_braille(
-            tex, args.size, lon0, lat0, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
-        )
+        body = render_braille(tex, cols, disc_h, rx_c, ry_c, lon0, lat0, args.color,
+                              stars, not args.no_ring, args.palette, sun, ocean, rings)
     else:
         ramp = args.ramp or (ASCII_RAMP if args.glyphs == "ascii" else UNICODE_RAMP)
-        body, width = render_ramp(
-            tex, args.size, lon0, lat0, ramp, args.color,
-            0.0 if args.no_stars else args.stars, not args.no_ring, args.aspect, args.palette, sun,
-        )
+        body = render_ramp(tex, cols, disc_h, rx_c, ry_c, lon0, lat0, ramp, args.color,
+                           stars, not args.no_ring, args.palette, sun, ocean, rings)
     lines = []
-    if not args.no_labels:
-        lines += [_center(args.top, width, args.color), ""]
+    if labels:
+        lines.append(_center(args.top, cols, args.color))
     lines += body
-    if not args.no_labels:
-        lines += ["", _center(args.bottom, width, args.color)]
+    if labels:
+        lines.append(_center(args.bottom, cols, args.color))
     if status is not None:
         for sline in status.split("\n"):
-            lines.append(_center(sline, width, args.color))
-    # Centre the whole frame horizontally in the terminal.
-    cols = shutil.get_terminal_size((100, 40))[0]
-    lead = " " * max(0, (cols - width) // 2)
-    return "\n".join(lead + ln for ln in lines)
+            lines.append(_center(sline, cols, args.color))
+    return "\n".join(lines)
 
 
 # ==========================
@@ -519,11 +603,10 @@ def build_frame(tex, args, status=None):
 
 
 def auto_size(aspect: float) -> int:
-    # Reserve rows for: 2 disc pad + 4 caption lines + 1 status + 2 safety. If
-    # the disc is taller than the window the frame scrolls and "swims" on every
-    # redraw, so be conservative on height.
+    # Largest planet that fits the disc area (terminal minus the two caption
+    # rows) with a little breathing room. Anything bigger just gets clipped.
     cols, rows = shutil.get_terminal_size((100, 40))
-    return max(20, min(cols - 2, int((rows - 9) * aspect)))
+    return max(16, int(min(cols, (rows - 4) * aspect) * 0.94))
 
 
 def resolve_color(choice: str) -> str:
@@ -577,7 +660,7 @@ def interactive(tex, args):
     old = termios.tcgetattr(fd)
     snap = {k: getattr(args, k) for k in (
         "lon", "lat", "size", "glyphs", "palette", "color", "sun", "follow",
-        "saturation", "gamma", "no_stars", "no_ring", "no_labels")}
+        "saturation", "gamma", "no_stars", "no_ring", "no_labels", "body", "top", "bottom")}
     modes = ["braille", "unicode", "ascii"]
     colors = ["truecolor", "256", "none"]
     autospin = False
@@ -586,6 +669,7 @@ def interactive(tex, args):
     HELP_LINES = [
         "ascii-earth  —  hotkeys",
         "",
+        "<   /   >           previous / next body  (planets, moon, sun)",
         "arrows / h j k l    rotate   (disabled in follow)",
         "+   -               zoom",
         "space               auto-spin",
@@ -637,9 +721,9 @@ def interactive(tex, args):
                 sys.stdout.write("".join(out) + "\x1b[J")
                 sys.stdout.flush()
             else:
-                bar = (f"  {args.palette} · {args.glyphs} · {args.color} · "
+                bar = (f"  {args.body} · {args.palette} · {args.glyphs} · "
                        f"sun {'on' if args.sun else 'off'} · follow {'on' if args.follow else 'off'} · "
-                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     ? keys · q quit")
+                       f"sat {args.saturation:.1f} gam {args.gamma:.2f}     <>body · ? keys · q quit")
                 frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
                 sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
                 sys.stdout.flush()
@@ -681,6 +765,12 @@ def interactive(tex, args):
                         raise KeyboardInterrupt
                     elif k == "?":
                         help_open = True
+                    elif k in ("<", ">"):  # previous / next body
+                        args.body = cycle(BODY_NAMES, args.body, -1 if k == "<" else 1)
+                        tex = body_texture(args.body)
+                        bi = BODIES[args.body]
+                        args.top = bi.get("top", args.body.upper())
+                        args.bottom = bi.get("bottom", "")
                     elif k in ("h", "\x1b[D"):
                         rotate(dlon=-args.step)
                     elif k in ("l", "\x1b[C"):
@@ -742,7 +832,9 @@ def interactive(tex, args):
 
 
 def main():
-    p = argparse.ArgumentParser(description="UTF-8 Earth poster for the terminal")
+    p = argparse.ArgumentParser(description="UTF-8 planet renderer for the terminal")
+    p.add_argument("--body", choices=BODY_NAMES, default="earth",
+                   help="celestial body: " + ", ".join(BODY_NAMES))
     p.add_argument("--glyphs", choices=["braille", "unicode", "ascii"], default="braille")
     p.add_argument("--palette", choices=PALETTE_NAMES, default="natural",
                    help="colour scheme: " + ", ".join(PALETTE_NAMES))
@@ -761,8 +853,8 @@ def main():
     p.add_argument("--no-stars", action="store_true")
     p.add_argument("--no-ring", action="store_true")
     p.add_argument("--no-labels", action="store_true")
-    p.add_argument("--top", default="THAT'S NO EARTH!")
-    p.add_argument("--bottom", default="IT'S A SPACE STATION.")
+    p.add_argument("--top", default=None, help="top caption (default: per body)")
+    p.add_argument("--bottom", default=None, help="bottom caption (default: per body)")
     p.add_argument("-i", "--interactive", action="store_true", help="drive with keyboard + mouse")
     p.add_argument("--spin", action="store_true", help="auto-rotate instead of printing once")
     p.add_argument("--fps", type=float, default=12.0)
@@ -771,6 +863,11 @@ def main():
 
     args.color = resolve_color(args.color)
     set_color(args.saturation, args.gamma)
+    info = BODIES[args.body]
+    if args.top is None:
+        args.top = info.get("top", args.body.upper())
+    if args.bottom is None:
+        args.bottom = info.get("bottom", "")
     now = datetime.datetime.now(datetime.timezone.utc)
     if args.follow:
         # Sun-locked view starts looking straight at the current sub-solar point.
@@ -792,7 +889,9 @@ def main():
         args.lat = 18.0
     if args.size <= 0:
         args.size = auto_size(args.aspect)
-    tex = load_texture(fetch_texture())
+        if info.get("rings"):  # leave room for the rings
+            args.size = int(args.size / info["rings"]["outer"])
+    tex = body_texture(args.body)
 
     if args.interactive:
         interactive(tex, args)
