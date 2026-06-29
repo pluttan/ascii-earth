@@ -167,26 +167,35 @@ def _project(width, height, rx, ry, lon0, lat0, tex):
     return inside, z, bright, is_ocean, rgb
 
 
-def _boost(r, g, b, sat=1.9, gain=1.35, lift=20):
-    """Push texture colour toward map-like saturation + brightness. Blue Marble
-    is dark, so lift the shadows or the ocean reads near-black."""
+# Gamma < 1 lifts the shadows: dark Blue Marble ocean becomes a bright blue.
+_GAMMA = 0.6
+_GLUT = [int(round(255 * (i / 255.0) ** _GAMMA)) for i in range(256)]
+
+
+def _boost(r, g, b, sat=2.0, gain=1.2, lift=8):
+    """Saturate texture colour, then gamma-lift so the map reads bright."""
     m = (r + g + b) / 3.0
-    r, g, b = m + (r - m) * sat, m + (g - m) * sat, m + (b - m) * sat
-    return (
-        max(0, min(255, int(r * gain + lift))),
-        max(0, min(255, int(g * gain + lift))),
-        max(0, min(255, int(b * gain + lift))),
-    )
+    r = max(0, min(255, int((m + (r - m) * sat) * gain + lift)))
+    g = max(0, min(255, int((m + (g - m) * sat) * gain + lift)))
+    b = max(0, min(255, int((m + (b - m) * sat) * gain + lift)))
+    return (_GLUT[r], _GLUT[g], _GLUT[b])
 
 
-def cell_color(rgb, is_ocean, bright, z, tint):
-    shade = 0.64 + 0.36 * z  # mild limb darkening; keep the rim from going black
+# Atlas-style ocean: bright blue, deep -> shallow. The raw Blue Marble ocean is
+# near-black in deep water, so we restyle it like a physical map instead.
+SEA_DEEP, SEA_SHALLOW = (26, 78, 150), (120, 198, 226)
+
+
+def cell_color(rgb, is_ocean, bright, tint):
+    # Flat shading on purpose: a radial limb gradient made a bright "circle" on
+    # the open ocean. The disc reads as a sphere from the map itself.
     if tint == "blue":
         a, b = (OCEAN_RGB if is_ocean else LAND_RGB)
-        c = _lerp(a, b, float(bright))
-    else:  # natural map colours straight from the Blue Marble texture
-        c = _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
-    return (int(c[0] * shade), int(c[1] * shade), int(c[2] * shade))
+        return _lerp(a, b, float(bright))
+    if is_ocean:
+        t = max(0.0, min(1.0, (float(bright) - 0.24) / 0.30))
+        return _lerp(SEA_DEEP, SEA_SHALLOW, t)
+    return _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
 
 
 # ==========================
@@ -220,7 +229,7 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, tint):
                     glyph = ramp[idx[r, c]]
                     if glyph == " ":
                         glyph = "."
-                    col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], z[r, c], tint)
+                    col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], tint)
             else:
                 star = _star_at(r, c, stars)
                 if star is None:
@@ -283,8 +292,7 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, tint):
                     col = RING_RGB
                 else:
                     col = cell_color(
-                        rgb[cy, cx], bool(is_ocean[cy, cx]),
-                        float(bright[cy, cx]), float(z[cy, cx]), tint,
+                        rgb[cy, cx], bool(is_ocean[cy, cx]), float(bright[cy, cx]), tint,
                     )
                 glyph = chr(0x2800 + bits)
             else:
@@ -343,8 +351,11 @@ def build_frame(tex, args, status=None):
 
 
 def auto_size(aspect: float) -> int:
+    # Reserve rows for: 2 disc pad + 4 caption lines + 1 status + 2 safety. If
+    # the disc is taller than the window the frame scrolls and "swims" on every
+    # redraw, so be conservative on height.
     cols, rows = shutil.get_terminal_size((100, 40))
-    return max(20, min(cols - 2, int((rows - 6) * aspect)))
+    return max(20, min(cols - 2, int((rows - 9) * aspect)))
 
 
 def resolve_color(choice: str) -> str:
@@ -406,7 +417,8 @@ def interactive(tex, args):
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
             status = f"{args.glyphs}  lon {args.lon:>4.0f} lat {args.lat:>3.0f} sz {args.size}  {HELP}"
-            sys.stdout.write("\x1b[H" + build_frame(tex, args, status))
+            frame = build_frame(tex, args, status).replace("\n", "\x1b[K\n")
+            sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
             timeout = (1.0 / max(args.fps, 1.0)) if autospin else None
             if select.select([fd], [], [], timeout)[0]:
@@ -502,7 +514,8 @@ def main():
         sys.stdout.write("\x1b[2J\x1b[?25l")
         while True:
             args.lon = (args.lon + args.step) % 360
-            sys.stdout.write("\x1b[H" + build_frame(tex, args))
+            frame = build_frame(tex, args).replace("\n", "\x1b[K\n")
+            sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
             time.sleep(delay)
     except KeyboardInterrupt:
