@@ -184,12 +184,14 @@ def set_color(saturation: float, gamma: float):
     _GLUT = [int(round(255 * (i / 255.0) ** g)) for i in range(256)]
 
 
-def _boost(r, g, b, gain=1.2, lift=8):
-    """Saturate texture colour, then gamma-lift so the map reads bright."""
-    m = (r + g + b) / 3.0
-    r = max(0, min(255, int((m + (r - m) * _SAT) * gain + lift)))
-    g = max(0, min(255, int((m + (g - m) * _SAT) * gain + lift)))
-    b = max(0, min(255, int((m + (b - m) * _SAT) * gain + lift)))
+def _grade(c):
+    """Saturation + gamma applied to ANY colour. Going through here for every
+    palette means the sat/brightness controls hit ocean, land and false-colour
+    schemes alike (the ocean used to bypass them)."""
+    m = (c[0] + c[1] + c[2]) / 3.0
+    r = max(0, min(255, int(m + (c[0] - m) * _SAT)))
+    g = max(0, min(255, int(m + (c[1] - m) * _SAT)))
+    b = max(0, min(255, int(m + (c[2] - m) * _SAT)))
     return (_GLUT[r], _GLUT[g], _GLUT[b])
 
 
@@ -217,14 +219,13 @@ def _colormap(v, stops):
 def _pal_natural(rgb, ocean, bright):
     if ocean:
         return _lerp(SEA_DEEP, SEA_SHALLOW, _sea_t(bright))
-    return _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
+    return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
 
 
 def _pal_political(rgb, ocean, bright):
     if ocean:
         return _lerp((18, 92, 178), (150, 210, 238), _sea_t(bright))
-    r, g, b = _boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))
-    return (r, min(255, int(g * 1.12)), b)  # punchier greens for a political map
+    return (float(rgb[0]), min(255.0, rgb[1] * 1.15), float(rgb[2]))  # greener land
 
 
 def _pal_blue(rgb, ocean, bright):
@@ -246,7 +247,7 @@ def _pal_inferno(rgb, ocean, bright):
 def _pal_neon(rgb, ocean, bright):
     if ocean:
         return _lerp((30, 0, 50), (255, 40, 220), _sea_t(bright))
-    v = (_lum(_boost(float(rgb[0]), float(rgb[1]), float(rgb[2]))) / 255.0) ** 0.8
+    v = min(1.0, _lum((float(rgb[0]), float(rgb[1]), float(rgb[2]))) / 160.0)
     return _lerp((0, 40, 45), (40, 255, 210), v)
 
 
@@ -267,8 +268,9 @@ PALETTE_NAMES = list(PALETTES)
 
 def cell_color(rgb, is_ocean, bright, palette):
     # Flat shading on purpose: a radial gradient drew a bright "circle" on the
-    # open sea. Depth/relief come from the texture itself.
-    return PALETTES.get(palette, _pal_natural)(rgb, is_ocean, bright)
+    # open sea. Depth/relief come from the texture itself. _grade applies the
+    # sat/brightness controls uniformly (ocean included).
+    return _grade(PALETTES.get(palette, _pal_natural)(rgb, is_ocean, bright))
 
 
 # ==========================
@@ -295,12 +297,22 @@ def terminator(lat, lon, decl, sunlon):
 
 def _night(col, f: float):
     """Darken + cool a colour toward night by day-fraction f (1 day, 0 night)."""
-    g = 0.15 + 0.85 * f
+    g = 0.28 + 0.72 * f  # brighter night floor than before
     return (
         max(0, min(255, int(col[0] * g))),
         max(0, min(255, int(col[1] * g))),
-        max(0, min(255, int(col[2] * g + (1.0 - f) * 16))),
+        max(0, min(255, int(col[2] * g + (1.0 - f) * 22))),
     )
+
+
+CITY_RGB = (255, 214, 130)
+
+
+def _city_light(r: int, c: int) -> bool:
+    """Deterministic sparse 'city lights' on the night side. Procedural (no
+    real population data in this texture), just sprinkled warm dots on dark land."""
+    h = ((r * 92837111) ^ (c * 689287499)) & 0xFFFFFFFF
+    return (h % 100) < 7
 
 
 # ==========================
@@ -337,7 +349,11 @@ def render_ramp(tex, size, lon0, lat0, ramp, color, stars, ring, aspect, palette
                         glyph = "."
                     col = cell_color(rgb[r, c], is_ocean[r, c], bright[r, c], palette)
                     if illum is not None:
-                        col = _night(col, float(illum[r, c]))
+                        f = float(illum[r, c])
+                        if f < 0.45 and not is_ocean[r, c] and _city_light(r, c):
+                            col = CITY_RGB
+                        else:
+                            col = _night(col, f)
             else:
                 star = _star_at(r, c, stars)
                 if star is None:
@@ -416,7 +432,11 @@ def render_braille(tex, size, lon0, lat0, color, stars, ring, aspect, palette, s
                         rgb_c[r, c], bool(ocean_c[r, c]), float(bright_c[r, c]), palette,
                     )
                     if illum_c is not None:
-                        col = _night(col, float(illum_c[r, c]))
+                        f = float(illum_c[r, c])
+                        if f < 0.45 and not ocean_c[r, c] and _city_light(r, c):
+                            col = CITY_RGB
+                        else:
+                            col = _night(col, f)
                 glyph = chr(0x2800 + bits)
             else:
                 star = _star_at(r, c, stars) if not inside[cy, cx] else None
@@ -481,7 +501,7 @@ def auto_size(aspect: float) -> int:
     # the disc is taller than the window the frame scrolls and "swims" on every
     # redraw, so be conservative on height.
     cols, rows = shutil.get_terminal_size((100, 40))
-    return max(20, min(cols - 2, int((rows - 10) * aspect)))
+    return max(20, min(cols - 2, int((rows - 9) * aspect)))
 
 
 def resolve_color(choice: str) -> str:
@@ -495,9 +515,6 @@ def resolve_color(choice: str) -> str:
 # ===  Interactive mode  ===
 # ==========================
 
-KEYS = ("drag/hjkl move · wheel/+- zoom · g glyphs · p/P palette · c color · "
-        "n day/night · v stars · o ring · b labels · [] sat · ,. bright · "
-        "space spin · r reset · q quit")
 
 
 def _parse_input(buf):
@@ -543,18 +560,64 @@ def interactive(tex, args):
     colors = ["truecolor", "256", "none"]
     autospin = False
     drag = None  # last (x, y) while dragging
+    menu_open = False
+    menu_i = 0
+    PARAMS = ["palette", "glyphs", "color", "day/night", "follow sun",
+              "stars", "ring", "labels", "saturation", "brightness"]
 
     def cycle(seq, cur, d=1):
         return seq[(seq.index(cur) + d) % len(seq)] if cur in seq else seq[0]
+
+    def mval(name):
+        return {
+            "palette": args.palette, "glyphs": args.glyphs, "color": args.color,
+            "day/night": "on" if args.sun else "off",
+            "follow sun": "on" if (args.sun and autospin) else "off",
+            "stars": "off" if args.no_stars else "on",
+            "ring": "off" if args.no_ring else "on",
+            "labels": "off" if args.no_labels else "on",
+            "saturation": f"{args.saturation:.1f}", "brightness": f"{args.gamma:.2f}",
+        }[name]
+
+    def mchange(name, d):
+        nonlocal autospin
+        if name == "palette":
+            args.palette = cycle(PALETTE_NAMES, args.palette, d)
+        elif name == "glyphs":
+            args.glyphs = cycle(modes, args.glyphs, d)
+        elif name == "color":
+            args.color = cycle(colors, args.color, d)
+        elif name == "day/night":
+            args.sun = not args.sun
+        elif name == "follow sun":  # spin the globe in step with the lit side
+            on = not (args.sun and autospin)
+            args.sun, autospin = on, on
+        elif name == "stars":
+            args.no_stars = not args.no_stars
+        elif name == "ring":
+            args.no_ring = not args.no_ring
+        elif name == "labels":
+            args.no_labels = not args.no_labels
+        elif name == "saturation":
+            args.saturation = max(0.0, min(4.0, args.saturation + 0.1 * d))
+            set_color(args.saturation, args.gamma)
+        elif name == "brightness":
+            args.gamma = max(0.2, min(1.5, args.gamma - 0.05 * d))
+            set_color(args.saturation, args.gamma)
 
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\x1b[2J\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         while True:
-            state = (f"{args.glyphs} · {args.palette} · {args.color} · "
-                     f"sun {'on' if args.sun else 'off'} · sat {args.saturation:.1f} "
-                     f"gam {args.gamma:.2f} · lon {args.lon:.0f} lat {args.lat:.0f} sz {args.size}")
-            frame = build_frame(tex, args, state + "\n" + KEYS).replace("\n", "\x1b[K\n")
+            if menu_open:
+                p = PARAMS[menu_i]
+                bar = (f"  ‹ {p}: {mval(p)} ›     up/down: pick   left/right: change   "
+                       f"?: close   q: quit")
+            else:
+                bar = (f"  {args.palette} · sun {'on' if args.sun else 'off'} · sz {args.size}"
+                       f"     drag/arrows: rotate   wheel/+-: zoom   space: spin   "
+                       f"?: settings   q: quit")
+            frame = build_frame(tex, args, bar).replace("\n", "\x1b[K\n")
             sys.stdout.write("\x1b[H" + frame + "\x1b[K\x1b[J")
             sys.stdout.flush()
             timeout = (1.0 / max(args.fps, 1.0)) if (autospin or args.sun) else None
@@ -576,8 +639,24 @@ def interactive(tex, args):
                             drag = (x, y)
                         continue
                     k = ev[1]
+                    if menu_open:
+                        if k in ("?", "\x1b"):
+                            menu_open = False
+                        elif k == "q":
+                            raise KeyboardInterrupt
+                        elif k in ("k", "\x1b[A"):
+                            menu_i = (menu_i - 1) % len(PARAMS)
+                        elif k in ("j", "\x1b[B"):
+                            menu_i = (menu_i + 1) % len(PARAMS)
+                        elif k in ("h", "\x1b[D"):
+                            mchange(PARAMS[menu_i], -1)
+                        elif k in ("l", "\x1b[C"):
+                            mchange(PARAMS[menu_i], 1)
+                        continue
                     if k in ("q", "\x1b"):
                         raise KeyboardInterrupt
+                    elif k == "?":
+                        menu_open = True
                     elif k in ("h", "\x1b[D"):
                         args.lon = (args.lon - args.step) % 360
                     elif k in ("l", "\x1b[C"):
@@ -590,30 +669,6 @@ def interactive(tex, args):
                         args.size += 4
                     elif k in ("-", "_"):
                         args.size = max(20, args.size - 4)
-                    elif k == "g":
-                        args.glyphs = cycle(modes, args.glyphs)
-                    elif k == "p":
-                        args.palette = cycle(PALETTE_NAMES, args.palette)
-                    elif k == "P":
-                        args.palette = cycle(PALETTE_NAMES, args.palette, -1)
-                    elif k == "c":
-                        args.color = cycle(colors, args.color)
-                    elif k == "n":
-                        args.sun = not args.sun
-                    elif k == "v":
-                        args.no_stars = not args.no_stars
-                    elif k == "o":
-                        args.no_ring = not args.no_ring
-                    elif k == "b":
-                        args.no_labels = not args.no_labels
-                    elif k == "]":
-                        args.saturation = min(4.0, args.saturation + 0.1); set_color(args.saturation, args.gamma)
-                    elif k == "[":
-                        args.saturation = max(0.0, args.saturation - 0.1); set_color(args.saturation, args.gamma)
-                    elif k == ".":
-                        args.gamma = max(0.2, args.gamma - 0.05); set_color(args.saturation, args.gamma)
-                    elif k == ",":
-                        args.gamma = min(1.5, args.gamma + 0.05); set_color(args.saturation, args.gamma)
                     elif k == " ":
                         autospin = not autospin
                     elif k == "r":
@@ -621,6 +676,7 @@ def interactive(tex, args):
                             setattr(args, key, val)
                         set_color(args.saturation, args.gamma)
                         autospin = False
+                        menu_open = False
             if autospin:
                 args.lon = (args.lon + args.step) % 360
     except KeyboardInterrupt:
