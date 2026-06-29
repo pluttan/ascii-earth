@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascii-earth"
+version = "1.0.0"
+description = "Render planets and the Sun as a live ASCII/Braille globe in your terminal"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "pluttan", email = "pluttan@ya.ru" }]
+requires-python = ">=3.9"
+dependencies = ["pillow>=10", "numpy>=1.21"]
+keywords = ["terminal", "ascii", "braille", "globe", "earth", "planets", "tui", "cli"]
+classifiers = [
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/pluttan/ascii-earth"
+Issues = "https://github.com/pluttan/ascii-earth/issues"
+
+[project.scripts]
+ascii-earth = "globe:main"
+
+[tool.setuptools]
+py-modules = ["globe"]
