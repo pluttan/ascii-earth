@@ -1,7 +1,7 @@
 <div align="center">
 
-<img src="screenshots/earth.gif" alt="ascii-earth — Earth" width="560">
-<img src="screenshots/demo.gif" alt="ascii-earth — Saturn &amp; Uranus rings" width="560">
+<img src="screenshots/earth.gif" alt="ascii-earth — Earth" width="640"><br>
+<img src="screenshots/demo.gif" alt="ascii-earth — Saturn &amp; Uranus rings" width="640">
 
 # ascii-earth
 
