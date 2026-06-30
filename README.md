@@ -28,6 +28,8 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 
 ## ■ Stack
 
+<div align="center">
+
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.9+ |
@@ -38,6 +40,8 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 | Input | termios raw mode, SGR mouse |
 | Day/night | Sub-solar point from UTC (declination + hour angle) |
 | Textures | NASA Blue Marble (PD) + Solar System Scope (CC-BY 4.0) |
+
+</div>
 
 ## ■ How It Works
 
@@ -52,9 +56,17 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 
 ## ■ Screenshots
 
+<div align="center">
+
 ![Earth](screenshots/earth.gif)
 
+*Earth in the natural palette, rotating in a real terminal*
+
 ![Saturn and Uranus rings](screenshots/demo.gif)
+
+*Saturn and Uranus rendered with their rings*
+
+</div>
 
 ## ■ Usage
 
@@ -83,6 +95,8 @@ make run          # interactive
 
 ## ■ Keys
 
+<div align="center">
+
 | Key | Action |
 |-----|--------|
 | `<` / `>` | previous / next body |
@@ -102,6 +116,8 @@ make run          # interactive
 | `r` | reset |
 | `?` | show / hide the full key list |
 | `q` / `Esc` | quit |
+
+</div>
 
 ## ■ Textures & Attribution
 

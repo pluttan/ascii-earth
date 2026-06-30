@@ -28,6 +28,8 @@
 
 ## ■ Stack
 
+<div align="center">
+
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.9+ |
@@ -38,6 +40,8 @@
 | Input | termios raw mode, SGR mouse |
 | Day/night | Sub-solar point from UTC (declination + hour angle) |
 | Textures | NASA Blue Marble (PD) + Solar System Scope (CC-BY 4.0) |
+
+</div>
 
 ## ■ How It Works
 
@@ -52,9 +56,17 @@
 
 ## ■ Screenshots
 
+<div align="center">
+
 ![Earth](screenshots/earth.gif)
 
+*Земля в палитре natural, вращается в реальном терминале*
+
 ![Saturn and Uranus rings](screenshots/demo.gif)
+
+*Сатурн и Уран с кольцами*
+
+</div>
 
 ## ■ Usage
 
