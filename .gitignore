@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.ansi
 *.png
+!header.png
 !screenshots/*.png
 build/
 dist/
