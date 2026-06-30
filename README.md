@@ -1,4 +1,4 @@
-![ascii-earth](screenshots/bodies.png)
+![ascii-earth](screenshots/demo.gif)
 
 <div align="center">
 
