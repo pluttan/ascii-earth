@@ -1,4 +1,5 @@
-![ascii-earth](screenshots/demo.gif)
+![ascii-earth — Earth](screenshots/earth.gif)
+![ascii-earth — Saturn & Uranus rings](screenshots/demo.gif)
 
 <div align="center">
 
