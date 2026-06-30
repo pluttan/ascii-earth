@@ -66,6 +66,10 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 
 *Saturn and Uranus rendered with their rings*
 
+![Reference poster](screenshots/reference.png)
+
+*The original ASCII poster that inspired ascii-earth*
+
 </div>
 
 ## ■ Usage

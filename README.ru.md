@@ -66,6 +66,10 @@
 
 *Сатурн и Уран с кольцами*
 
+![Reference poster](screenshots/reference.png)
+
+*Исходный ASCII-постер, с которого начался ascii-earth*
+
 </div>
 
 ## ■ Usage
