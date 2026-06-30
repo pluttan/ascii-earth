@@ -1,74 +1,96 @@
+![ascii-earth](screenshots/bodies.png)
+
+<div align="center">
+
 # ascii-earth
 
-Render the planets, the Moon and the Sun as a live, colour ASCII/Braille globe
-right in your terminal — with real-time day/night, Saturn's rings, real
-relative sizes and a pile of palettes.
+**Render the planets, the Moon and the Sun as a live colour ASCII/Braille globe in your terminal**
+
+[![License](https://img.shields.io/github/license/pluttan/ascii-earth?style=for-the-badge&color=2C2C2C&labelColor=1E1E1E)](https://github.com/pluttan/ascii-earth/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9+-2C2C2C?style=for-the-badge&logo=python&labelColor=1E1E1E)](https://python.org)
+[![Platform](https://img.shields.io/badge/terminal-POSIX-2C2C2C?style=for-the-badge&labelColor=1E1E1E)](https://github.com/pluttan/ascii-earth)
+
+</div>
+
+A real equirectangular texture is back-projected onto a sphere (orthographic projection), sampled per terminal cell and recoloured. The disc sits in a full starfield, captions pin to the top and bottom edges, and everything is driven live from the keyboard and the mouse — day/night by the real Sun, Saturn's rings, real relative sizes and a pile of palettes.
 
 > THAT'S NO EARTH! — IT'S A SPACE STATION.
 
-A real equirectangular texture is back-projected onto a sphere (orthographic
-projection), sampled per terminal cell and recoloured. The disc sits in a full
-starfield, captions pin to the top and bottom edges, and everything is driven
-live from the keyboard and the mouse.
+## ■ Features
 
-## Features
+- ❖ **11 bodies** — Earth, Sun, Mercury, Venus, Moon, Mars, Jupiter, Saturn, Uranus, Neptune, Ceres. Switch on the fly with `<` / `>`.
+- ❖ **Rings** for Saturn and Uranus — an ellipse with proper sphere occlusion (front arc over the disc, back arc hidden), a Cassini-style gap and azimuthal clumps so the spin is visible.
+- ❖ **Real-time day / night** (`--sun`) — lit by the actual current position of the Sun; the night side fades to bright black-and-white.
+- ❖ **Follow the Sun** (`--follow`) — a Sun-locked view that always shows the day side while Earth turns under it at the real rate (one turn per 24 h).
+- ❖ **Scale modes** (`m`) — `fit`, `real` (true relative radii: the Sun is a wall, Ceres is a dot) and `sqrt` (a readable compromise). Zoom rescales the whole system together.
+- ❖ **3 glyph modes** (`g`) — braille (2×4 sub-pixel, default), unicode (a dense 56-level UTF-8 ramp) and ascii.
+- ❖ **10 palettes** (`p`) — natural, political, blue, green, amber, ice, mono, inferno, neon, catppuccin.
+- ❖ **Mouse + keyboard**, truecolor / 256 / mono output, works over tmux & mosh, ships its textures so it runs offline.
 
-- **11 bodies** — Earth, Sun, Mercury, Venus, Moon, Mars, Jupiter, Saturn,
-  Uranus, Neptune, Ceres. Switch on the fly with `<` / `>`.
-- **Rings** for Saturn and Uranus — an ellipse with proper sphere occlusion
-  (front arc over the disc, back arc hidden), a Cassini-style gap, and
-  azimuthal clumps so the spin is actually visible.
-- **Real-time day / night** (`--sun`) — the planet is lit by the actual current
-  position of the Sun; the night side fades to bright black-and-white.
-- **Follow the Sun** (`--follow`) — a Sun-locked view that always shows the day
-  side while Earth turns under it at the real rate (one turn per 24 h).
-- **Scale modes** (`m`) — `fit` (each body fills the screen), `real` (true
-  relative radii: the Sun is a wall, Ceres is a dot) and `sqrt` (a readable
-  compromise). Zoom rescales the whole system together.
-- **3 glyph modes** (`g`) — `braille` (2×4 sub-pixel, the default), `unicode`
-  (a dense 56-level UTF-8 ramp) and `ascii` (a plain letter weave).
-- **10 palettes** (`p`) — natural, political, blue, green, amber, ice, mono,
-  inferno, neon, catppuccin.
-- Mouse + keyboard control, truecolor / 256-colour / mono output, runs over
-  tmux/mosh.
+## ■ Installation
 
-## Install
+### pip (one-line)
 
-From GitHub (no clone needed):
-
-```sh
+```bash
 pip install "git+https://github.com/pluttan/ascii-earth"
-ascii-earth -i          # interactive
-ascii-earth --body mars # one-shot poster
+ascii-earth -i
 ```
 
-Or from a clone, in a virtualenv:
+### From Source
 
-```sh
-git clone https://github.com/pluttan/ascii-earth
+```bash
+git clone https://github.com/pluttan/ascii-earth.git
 cd ascii-earth
-make install            # venv in ~/.cache + pillow/numpy
-make run                # interactive
+make install        # venv in ~/.cache + pillow/numpy
+make run            # interactive
 ```
 
-The body textures are bundled with the package, so it works fully offline. (If
-a texture is ever missing it falls back to downloading into
-`~/.cache/ascii-earth/`.)
+### Requirements
 
-## Usage
+- Python 3.9+
+- `pillow`, `numpy`
+- a 256-colour (or truecolor) terminal; braille mode needs a font with Braille glyphs
 
-```sh
-ascii-earth [options]
+Textures are bundled, so it works fully offline.
+
+## ■ Usage
+
+```bash
+ascii-earth -i                              # interactive
+ascii-earth --body saturn --lat 26          # Saturn, rings open
+ascii-earth --body jupiter --spin           # auto-rotating Jupiter
+ascii-earth --sun                           # Earth right now: day & night
+ascii-earth --scale real --body mars        # true relative size
+ascii-earth --palette catppuccin --color truecolor
 ```
 
-Interactive (`ascii-earth -i` / `make run`) — minimal keys, the rest under `?`:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--body NAME` | `earth` | celestial body (earth/sun/mars/jupiter/saturn/…) |
+| `--scale {fit,sqrt,real}` | `fit` | fit / sqrt-compressed / real radii |
+| `--no-rings` | — | hide Saturn/Uranus rings |
+| `--glyphs {braille,unicode,ascii}` | `braille` | render glyph set |
+| `--palette NAME` | `natural` | colour scheme |
+| `--color {auto,256,truecolor,none}` | `auto` | colour depth |
+| `--sun` | — | real-time day/night terminator |
+| `--follow` | — | Sun-locked view, 24 h rotation |
+| `--spin` | — | auto-rotate |
+| `--size N` | `0` (auto) | disc diameter in columns; `0` fits the terminal |
+| `--lon DEG` / `--lat DEG` | auto | central longitude / view latitude (+north) |
+| `--saturation F` / `--gamma F` | `2.1` / `0.55` | colour saturation / brightness |
+| `--no-stars` / `--no-ring` / `--no-labels` | — | drop elements |
+| `-i`, `--interactive` | — | keyboard + mouse mode |
+
+## ■ Interactive Keys
+
+Minimal keys; the rest live under `?`.
 
 | Key | Action |
-|---|---|
+|-----|--------|
 | `<` / `>` | previous / next body |
 | `m` | scale mode (fit → sqrt → real) |
 | `R` | planetary rings on / off |
-| mouse drag / arrows / `h j k l` | rotate (disabled in follow) |
+| drag / arrows / `h j k l` | rotate (disabled in follow) |
 | wheel / `+` `-` | zoom |
 | `g` | glyph mode (braille / unicode / ascii) |
 | `p` / `P` | palette next / previous |
@@ -83,53 +105,26 @@ Interactive (`ascii-earth -i` / `make run`) — minimal keys, the rest under `?`
 | `?` | show / hide the full key list |
 | `q` / `Esc` | quit |
 
-Examples:
+## ■ Palettes
 
-```sh
-ascii-earth --body saturn --lat 26          # Saturn, rings open
-ascii-earth --body jupiter --spin           # auto-rotating Jupiter
-ascii-earth --sun                           # Earth right now: day & night
-ascii-earth --scale real --body mars        # true relative size
-ascii-earth --palette catppuccin --color truecolor
-```
+| Palette | Look |
+|---------|------|
+| `natural` | real map colours (blue ocean, green/brown land, white ice) |
+| `political` | brighter, punchier map |
+| `blue` | stylised blue-grey |
+| `green` / `amber` / `ice` | phosphor / amber / blueprint monochrome |
+| `mono` | black & white |
+| `inferno` | false-colour heatmap |
+| `neon` | acid cyan / magenta |
+| `catppuccin` | Catppuccin Mocha |
 
-| Option | Default | What it does |
-|---|---|---|
-| `--body NAME` | `earth` | celestial body (earth/sun/mars/jupiter/saturn/…) |
-| `--scale {fit,sqrt,real}` | `fit` | size: fit / sqrt-compressed / real radii |
-| `--no-rings` | — | hide Saturn/Uranus rings |
-| `--glyphs {braille,unicode,ascii}` | `braille` | render glyph set |
-| `--palette NAME` | `natural` | colour scheme |
-| `--color {auto,256,truecolor,none}` | `auto` | colour depth |
-| `--sun` | — | real-time day/night terminator |
-| `--follow` | — | Sun-locked view, 24 h rotation |
-| `--spin` | — | auto-rotate |
-| `--size N` | `0` (auto) | disc diameter in columns; `0` fits the terminal |
-| `--lon DEG` / `--lat DEG` | auto | central longitude / view latitude (+north) |
-| `--saturation F` / `--gamma F` | `2.1` / `0.55` | colour saturation / brightness |
-| `--stars F` | `0.03` | starfield density |
-| `--no-stars` / `--no-ring` / `--no-labels` | — | drop elements |
-| `--top STR` / `--bottom STR` | per body | custom captions |
-| `-i`, `--interactive` | — | keyboard + mouse mode |
+## ■ Textures & Attribution
 
-Under `screen`/`tmux`/`mosh` without truecolor, `--color auto` picks 256.
-
-## Requirements
-
-`python3.9+`, `pillow`, `numpy`, a 256-colour (or truecolor) terminal. Braille
-mode needs a font with Braille glyphs (most monospace Nerd Fonts have them).
-
-## Textures & attribution
-
-Textures are bundled in `ascii_earth/textures/` and keep their own licenses
-(see [NOTICE](NOTICE)):
+Textures are bundled in `ascii_earth/textures/` and keep their own licenses (see [NOTICE](NOTICE)):
 
 - **Earth** — NASA Blue Marble (*land + shallow topography*), public domain.
-- **All other bodies** — [Solar System Scope](https://www.solarsystemscope.com/textures)
-  equirectangular textures, licensed **CC-BY 4.0**. Attribution to Solar System
-  Scope is required when redistributing them.
+- **All other bodies** — [Solar System Scope](https://www.solarsystemscope.com/textures) equirectangular textures, **CC-BY 4.0**. Attribution to Solar System Scope is required when redistributing them.
 
-## License
+## ■ License
 
-MIT — see [LICENSE](LICENSE). The code is MIT; the runtime-downloaded textures
-keep their own licenses (above).
+MIT © [pluttan](https://github.com/pluttan)
