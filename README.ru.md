@@ -15,7 +15,7 @@
 
 Реальная equirectangular-текстура back-проецируется на сферу (ортографическая проекция), сэмплируется по каждой ячейке терминала и раскрашивается. Диск стоит в звёздном поле на весь экран, подписи приклеены к верхней и нижней границе, а управление — живьём с клавиатуры и мыши: день/ночь по реальному положению солнца, кольца Сатурна, реальные относительные размеры и куча палитр. Текстуры в комплекте — работает офлайн.
 
-## ■ Features
+## ■ Возможности
 
 - ❖ **11 тел** — Земля, Солнце, Меркурий, Венера, Луна, Марс, Юпитер, Сатурн, Уран, Нептун, Церера; переключение на лету через `<` / `>`
 - ❖ **Кольца** — у Сатурна и Урана эллипс с честным заслонением сферой (передняя дуга поверх диска, задняя скрыта), Cassini-щель и азимутальные сгустки, чтобы вращение было видно
@@ -26,24 +26,24 @@
 - ❖ **10 палитр** (`p`) — natural, political, blue, green, amber, ice, mono, inferno, neon, catppuccin
 - ❖ **Мышь + клавиатура**, вывод truecolor / 256 / ч-б, работает под tmux и mosh
 
-## ■ Stack
+## ■ Стек
 
 <div align="center">
 
-| Component | Technology |
+| Компонент | Технология |
 |-----------|-----------|
-| Language | Python 3.9+ |
-| Image sampling | Pillow |
-| Vector maths | NumPy |
-| Projection | Orthographic back-projection, per-cell texture sampling |
-| Output | ANSI truecolor / 256-colour, Braille & UTF-8 glyphs |
-| Input | termios raw mode, SGR mouse |
-| Day/night | Sub-solar point from UTC (declination + hour angle) |
-| Textures | NASA Blue Marble (PD) + Solar System Scope (CC-BY 4.0) |
+| Язык | Python 3.9+ |
+| Сэмплирование изображений | Pillow |
+| Векторная математика | NumPy |
+| Проекция | Orthographic back-projection, per-cell texture sampling |
+| Вывод | ANSI truecolor / 256-colour, Braille & UTF-8 glyphs |
+| Ввод | termios raw mode, SGR mouse |
+| День/ночь | Sub-solar point from UTC (declination + hour angle) |
+| Текстуры | NASA Blue Marble (PD) + Solar System Scope (CC-BY 4.0) |
 
 </div>
 
-## ■ How It Works
+## ■ Как работает
 
 ```
 1. Выбираешь тело — грузится его equirectangular-текстура (в комплекте, офлайн)
@@ -54,7 +54,7 @@
 6. Клавиатура и мышь управляют вращением, зумом, телом, масштабом, палитрой и день/ночью вживую
 ```
 
-## ■ Screenshots
+## ■ Скриншоты
 
 <div align="center">
 
@@ -72,7 +72,7 @@
 
 </div>
 
-## ■ Usage
+## ■ Запуск
 
 ```bash
 # Установка с GitHub
