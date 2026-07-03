@@ -1,15 +1,8 @@
-![Header](header.png)
-
 <div align="center">
 
 # ascii-earth
 
 **Рисует планеты, Луну и Солнце живым глобусом прямо в терминале**
-
-[![License](https://img.shields.io/badge/license-MIT-2C2C2C?style=for-the-badge&labelColor=1E1E1E)](LICENSE)
-[![Python](https://img.shields.io/badge/Python_3.9+-3776AB?style=for-the-badge&logo=python&labelColor=1E1E1E)](https://python.org)
-[![NumPy](https://img.shields.io/badge/NumPy-013243?style=for-the-badge&logo=numpy&labelColor=1E1E1E)](https://numpy.org)
-[![Pillow](https://img.shields.io/badge/Pillow-2C2C2C?style=for-the-badge&logo=python&labelColor=1E1E1E)](https://python-pillow.org)
 
 </div>
 
@@ -22,7 +15,7 @@
 - ❖ **День/ночь в реальном времени** (`--sun`) — освещение по текущей подсолнечной точке; ночная сторона уходит в яркий чёрно-белый
 - ❖ **Слежение за солнцем** (`--follow`) — вид со стороны солнца, всегда видна дневная сторона, Земля вращается с реальной скоростью (оборот за 24 ч)
 - ❖ **Режимы масштаба** (`m`) — `fit`, `real` (реальные радиусы: Солнце — стена, Церера — точка) и `sqrt` (читаемый компромисс)
-- ❖ **3 режима глифов** (`g`) — braille (субпиксель 2×4), плотный 56-уровневый UTF-8 ramp и обычный ASCII
+- ❖ **3 режима глифов** (`g`) — braille (субпиксель 2×4, по умолчанию), плотный 56-уровневый UTF-8 ramp и обычный ASCII
 - ❖ **10 палитр** (`p`) — natural, political, blue, green, amber, ice, mono, inferno, neon, catppuccin
 - ❖ **Мышь + клавиатура**, вывод truecolor / 256 / ч-б, работает под tmux и mosh
 
@@ -43,7 +36,7 @@
 
 </div>
 
-## ■ Как работает
+## ■ Как это работает
 
 ```
 1. Выбираешь тело — грузится его equirectangular-текстура (в комплекте, офлайн)
@@ -72,7 +65,7 @@
 
 </div>
 
-## ■ Запуск
+## ■ Использование
 
 ```bash
 # Установка с GitHub
@@ -92,6 +85,6 @@ ascii-earth --palette catppuccin --color truecolor
 
 Текстуры в комплекте, под своими лицензиями: **Земля** — NASA Blue Marble, public domain; **остальные тела** — [Solar System Scope](https://www.solarsystemscope.com/textures), **CC-BY 4.0** (атрибуция обязательна).
 
-## ■ License
+## ■ Лицензия
 
 MIT © [pluttan](https://github.com/pluttan)
