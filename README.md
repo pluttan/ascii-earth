@@ -1,15 +1,8 @@
-![Header](header.png)
-
 <div align="center">
 
 # ascii-earth
 
 **Render the planets, the Moon and the Sun as a live terminal globe**
-
-[![License](https://img.shields.io/badge/license-MIT-2C2C2C?style=for-the-badge&labelColor=1E1E1E)](LICENSE)
-[![Python](https://img.shields.io/badge/Python_3.9+-3776AB?style=for-the-badge&logo=python&labelColor=1E1E1E)](https://python.org)
-[![NumPy](https://img.shields.io/badge/NumPy-013243?style=for-the-badge&logo=numpy&labelColor=1E1E1E)](https://numpy.org)
-[![Pillow](https://img.shields.io/badge/Pillow-2C2C2C?style=for-the-badge&logo=python&labelColor=1E1E1E)](https://python-pillow.org)
 
 </div>
 
@@ -21,7 +14,7 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 - ❖ **Rings** — Saturn and Uranus get an ellipse with proper sphere occlusion (front arc over the disc, back arc hidden), a Cassini-style gap and azimuthal clumps so the spin is visible
 - ❖ **Real-time day / night** (`--sun`) — lit by the actual current sub-solar point; the night side fades to bright black-and-white
 - ❖ **Follow the Sun** (`--follow`) — a Sun-locked view that always shows the day side while Earth turns under it at the real rate (one turn per 24 h)
-- ❖ **Scale modes** (`m`) — `fit`, `real` (true relative radii: the Sun is a wall, Ceres is a dot) and `sqrt` (a readable compromise); zoom rescales the whole system together
+- ❖ **Scale modes** (`m`) — `fit`, `real` (true relative radii: the Sun is a wall, Ceres is a dot) and `sqrt` (a readable compromise)
 - ❖ **3 glyph modes** (`g`) — braille (2×4 sub-pixel, default), a dense 56-level UTF-8 ramp, and plain ASCII
 - ❖ **10 palettes** (`p`) — natural, political, blue, green, amber, ice, mono, inferno, neon, catppuccin
 - ❖ **Mouse + keyboard**, truecolor / 256 / mono output, works over tmux & mosh
@@ -88,44 +81,9 @@ ascii-earth --scale real --body mars    # true relative size
 ascii-earth --palette catppuccin --color truecolor
 ```
 
-From source:
-
-```bash
-git clone https://github.com/pluttan/ascii-earth.git
-cd ascii-earth
-make install      # venv in ~/.cache + pillow/numpy
-make run          # interactive
-```
-
-## ■ Keys
-
-<div align="center">
-
-| Key | Action |
-|-----|--------|
-| `<` / `>` | previous / next body |
-| `m` | scale mode (fit → sqrt → real) |
-| `R` | planetary rings on / off |
-| drag / arrows / `h j k l` | rotate (off in follow) |
-| wheel / `+` `-` | zoom |
-| `g` | glyph mode (braille / unicode / ascii) |
-| `p` / `P` | palette next / previous |
-| `c` | colour mode (truecolor / 256 / none) |
-| `n` | day / night (real Sun) |
-| `f` | follow Sun |
-| `s` `o` `b` | stars / limb ring / captions |
-| `[` `]` | saturation − / + |
-| `,` `.` | brightness darker / lighter |
-| `space` | auto-spin |
-| `r` | reset |
-| `?` | show / hide the full key list |
-| `q` / `Esc` | quit |
-
-</div>
-
 ## ■ Textures & Attribution
 
-Textures are bundled in `ascii_earth/textures/` and keep their own licenses (see [NOTICE](NOTICE)): **Earth** — NASA Blue Marble, public domain; **all other bodies** — [Solar System Scope](https://www.solarsystemscope.com/textures), **CC-BY 4.0** (attribution required).
+Textures are bundled and keep their own licenses: **Earth** — NASA Blue Marble, public domain; **all other bodies** — [Solar System Scope](https://www.solarsystemscope.com/textures), **CC-BY 4.0** (attribution required).
 
 ## ■ License
 
