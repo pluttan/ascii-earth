@@ -145,7 +145,18 @@ def cells(text: str):
     return rows
 
 
-MONO = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSansMono.ttf"
+TTF = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+MONO = TTF / "DejaVuSansMono.ttf"
+
+
+def font_for(size: int):
+    """A glyph -> font picker: DejaVu Sans Mono, or DejaVu Sans for what it lacks."""
+    from fontTools.ttLib import TTFont
+    from PIL import ImageFont
+    has = set(TTFont(str(MONO))["cmap"].getBestCmap())
+    mono = ImageFont.truetype(str(MONO), size)
+    wide = ImageFont.truetype(str(TTF / "DejaVuSans.ttf"), size)
+    return lambda glyph: mono if ord(glyph) in has else wide
 
 
 def lay_out(text, cw: float, ch: float, sub: int = 4) -> Image.Image:
@@ -156,13 +167,12 @@ def lay_out(text, cw: float, ch: float, sub: int = 4) -> Image.Image:
     stars round the disc are plain glyphs in DejaVu Sans Mono. Takes the text
     or rows of cells already split.
     """
-    from PIL import ImageFont
     rows = cells(text) if isinstance(text, str) else text
     ncol = max(len(r) for r in rows)
     w, h = int(ncol * cw * sub), int(len(rows) * ch * sub)
     im = Image.new("RGB", (w, h), C["panel"])
     d = ImageDraw.Draw(im)
-    font = ImageFont.truetype(str(MONO), int(ch * 0.7 * sub))
+    font = font_for(int(ch * 0.8 * sub))
     rad = 0.19 * cw * sub
     for r, row in enumerate(rows):
         for c, (glyph, rgb) in enumerate(row):
@@ -171,7 +181,7 @@ def lay_out(text, cw: float, ch: float, sub: int = 4) -> Image.Image:
                 continue
             if not 0x2800 <= code <= 0x28FF:
                 d.text(((c + 0.5) * cw * sub, (r + 0.5) * ch * sub), glyph, fill=rgb,
-                       font=font, anchor="mm")
+                       font=font(glyph), anchor="mm")
                 continue
             bits = code - 0x2800
             for dy in range(4):
@@ -327,10 +337,67 @@ def fig_scale():
     save(fig, "scale.png")
 
 
+def panels(title: str, subtitle: str, shots, ncol: int, name: str):
+    """A card of program frames in a grid, a name under each one."""
+    width = 8.0
+    side, gap, label = 0.44, 0.16, 0.34
+    cell = (width - 2 * side - (ncol - 1) * gap) / ncol
+    h0 = shots[0][1].shape[0] / shots[0][1].shape[1] * cell
+    nrow = (len(shots) + ncol - 1) // ncol
+    height = 1.3 + nrow * (h0 + label) + 0.3
+    fig = plt.figure(figsize=(width, height), facecolor=C["card"])
+    field(fig)
+    fig.text(0.055, 1 - 0.38 / height, title, fontsize=21, va="top", **TITLE)
+    fig.text(0.055, 1 - 0.80 / height, subtitle, fontsize=10.5, color=C["muted"], va="top")
+    for i, (caption, im) in enumerate(shots):
+        r, c = divmod(i, ncol)
+        x = side + c * (cell + gap)
+        y = height - 1.3 - r * (h0 + label) - h0
+        ax = fig.add_axes([x / width, y / height, cell / width, h0 / height])
+        ax.imshow(im, interpolation="lanczos")
+        ax.axis("off")
+        fig.text((x + cell / 2) / width, (y - 0.06) / height, caption, fontsize=10.5,
+                 color=C["muted"], ha="center", va="top")
+    save(fig, name)
+
+
+PALETTE_RU = {"natural": "natural", "political": "political", "blue": "blue", "green": "green",
+              "amber": "amber", "ice": "ice", "mono": "mono", "inferno": "inferno",
+              "neon": "neon", "catppuccin": "catppuccin"}
+
+
+def fig_palettes():
+    """The same Earth in each of the ten palettes."""
+    shots = []
+    for pal in g.PALETTE_NAMES:
+        im = lay_out(frame(46, 23, size=44, palette=pal, lon=20.0, lat=20.0), 10, 20)
+        shots.append((PALETTE_RU[pal], np.asarray(im, float) / 255))
+    panels("Десять палитр", "одна и та же Земля, палитра меняется на ходу",
+           shots, 5, "palettes.png")
+
+
+def fig_glyphs():
+    """Europe close up in each of the three glyph modes."""
+    shots = []
+    for mode, caption in (("braille", "braille: точки Брайля"), ("unicode", "unicode: 56 знаков"),
+                          ("ascii", "ascii: как на постере")):
+        im = lay_out(frame(52, 28, size=84, glyphs=mode, lon=14.0, lat=34.0), 10, 20)
+        shots.append((caption, np.asarray(im, float) / 255))
+    panels("Три вида знаков", "одна и та же часть Земли, вид меняется на ходу", shots, 3, "glyphs.png")
+
+
+def fig_poster():
+    """The poster that started it, made again by the program: letters, the cool palette, captions."""
+    text = frame(96, 46, size=86, glyphs="ascii", palette="blue", lon=-20.0, lat=10.0,
+                 no_stars=False, no_labels=False,
+                 top="THAT'S NO EARTH!", bottom="IT'S A SPACE STATION.")
+    framed(lay_out(text, 14, 28), "poster.png")
+
+
 def main():
     style()
     print(f"рисую в {OUT}")
-    for fig in (fig_braille, fig_daynight, fig_scale, fig_cover):
+    for fig in (fig_braille, fig_poster, fig_glyphs, fig_palettes, fig_daynight, fig_scale, fig_cover):
         fig()
 
 
