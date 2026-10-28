@@ -29,3 +29,12 @@ all: install
 # Pictures of the Habr article: docs/article/img (fonts in docs/fonts).
 figures:
 	$(VENV)/bin/pip install -q matplotlib && $(PY) docs/article/figures.py
+
+# One-folder build with Python and the maps inside: dist/ascii-earth/ascii-earth.
+# The release workflow runs it on each OS; install.sh and Homebrew take the result.
+.PHONY: dist figures
+dist:
+	$(PY) -m PyInstaller --onedir --name ascii-earth --paths $(CURDIR) \
+		--add-data "$(CURDIR)/ascii_earth/textures:ascii_earth/textures" \
+		--exclude-module matplotlib --exclude-module tkinter --exclude-module PyInstaller \
+		--specpath build --noconfirm --log-level WARN packaging/entry.py

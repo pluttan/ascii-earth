@@ -68,7 +68,12 @@
 ## ■ Использование
 
 ```bash
-# Установка с GitHub
+# Установка: одна папка, внутри Python и карты, больше ничего не нужно (macOS, Linux)
+curl -fsSL https://raw.githubusercontent.com/pluttan/ascii-earth/main/install.sh | sh
+# или Homebrew
+brew install pluttan/tap/ascii-earth
+# или вручную: архив под свою ОС и процессор на странице Releases
+# или своим Python
 pip install "git+https://github.com/pluttan/ascii-earth"
 
 # Интерактивно (клавиатура + мышь)

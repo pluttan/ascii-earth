@@ -68,7 +68,12 @@ A real equirectangular texture is back-projected onto a sphere (orthographic pro
 ## ■ Usage
 
 ```bash
-# Install from GitHub
+# Install: one folder with Python and the maps inside, nothing else needed (macOS, Linux)
+curl -fsSL https://raw.githubusercontent.com/pluttan/ascii-earth/main/install.sh | sh
+# or Homebrew
+brew install pluttan/tap/ascii-earth
+# or by hand: an archive per OS and CPU on the Releases page
+# or with your own Python
 pip install "git+https://github.com/pluttan/ascii-earth"
 
 # Interactive (keyboard + mouse)
