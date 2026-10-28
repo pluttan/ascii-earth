@@ -25,3 +25,7 @@ clean:
 	rm -rf $(VENV) ascii_earth/__pycache__ *.pyc
 
 all: install
+
+# Pictures of the Habr article: docs/article/img (fonts in docs/fonts).
+figures:
+	$(VENV)/bin/pip install -q matplotlib && $(PY) docs/article/figures.py

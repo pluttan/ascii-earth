@@ -8,3 +8,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# The Habr article stays out of the open repo until it is published: the
+# uniqueness check would find the copy here.
+docs/article/habr-*.md
+!docs/article/img/*.png
