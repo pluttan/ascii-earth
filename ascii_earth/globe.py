@@ -41,7 +41,9 @@ _SSS = "https://commons.wikimedia.org/wiki/Special:FilePath/Solarsystemscope_tex
 
 BODIES = {
     "earth":   {"url": _NASA_EARTH, "file": "earth.jpg", "ocean": True, "r": 6371},
-    "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False, "r": 696340},
+    # star: it shines itself, so the day/night terminator never darkens it.
+    "sun":     {"url": _SSS + "sun.jpg", "file": "sun.jpg", "ocean": False, "r": 696340,
+                "star": True},
     "mercury": {"url": _SSS + "mercury.jpg", "file": "mercury.jpg", "ocean": False, "r": 2440},
     "venus":   {"url": _SSS + "venus_atmosphere.jpg", "file": "venus.jpg", "ocean": False, "r": 6052},
     "moon":    {"url": _SSS + "moon.jpg", "file": "moon.jpg", "ocean": False, "r": 1737},
@@ -605,6 +607,8 @@ def build_frame(tex, args, status=None):
     else:
         sun = None
     binfo = BODIES.get(getattr(args, "body", "earth"), {})
+    if binfo.get("star"):
+        sun = None  # a star is lit all round: follow still turns it, but no night side
     ocean = binfo.get("ocean", True)
     rings = None if getattr(args, "no_rings", False) else binfo.get("rings")
 
