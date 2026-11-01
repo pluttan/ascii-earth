@@ -32,7 +32,7 @@ figures:
 
 # One-folder build with Python and the maps inside: dist/ascii-earth/ascii-earth.
 # The release workflow runs it on each OS; install.sh and Homebrew take the result.
-.PHONY: dist figures test
+.PHONY: dist figures test formula
 dist:
 	$(PY) -m PyInstaller --onedir --name ascii-earth --paths $(CURDIR) \
 		--add-data "$(CURDIR)/ascii_earth/textures:ascii_earth/textures" \
@@ -42,3 +42,7 @@ dist:
 # Day/night of the Sun and Earth at a fixed moment; plain Python, no test runner.
 test:
 	$(PY) tests/test_daynight.py
+
+# Point the Homebrew tap (../homebrew-tap) at release V once its build is done.
+formula:
+	$(PY) packaging/bump-formula.py $(V)
